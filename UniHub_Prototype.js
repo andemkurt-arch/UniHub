@@ -8,7 +8,7 @@
 /* ---------- constants ---------- */
 const STORE_KEY = "unihub_db_v2";
 const SESSION_KEY = "unihub_session_v2";
-const STAFF_CODE = "KSU-STAFF";
+const STAFF_CODE = "592780752";
 const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
  
 const DOC_TYPES = [
@@ -410,13 +410,29 @@ function closeViewer() { ui.viewer = null; render(); }
 /* ==========================================================================
    Login + create account
    ========================================================================== */
+function eyeIcon(visible) {
+  return visible
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+}
+function togglePasswordVisibility(inputId) {
+  const input = document.getElementById(inputId);
+  const button = document.querySelector('[data-toggle-for="' + inputId + '"]');
+  if (!input || !button) return;
+  const visible = input.type === "password";
+  input.type = visible ? "text" : "password";
+  button.innerHTML = eyeIcon(visible);
+  button.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+  button.setAttribute("title", visible ? "Hide password" : "Show password");
+  input.focus();
+}
 function renderLogin() {
   return '<div class="auth">' +
     '<div class="brand"><div class="emblem"><span class="fl">' + icon("flame", 20) + '</span><span class="bk">' + icon("book", 18) + "</span></div>" +
     "<h1>UniHub</h1><p class=\"u\">Kalinga State University</p><p class=\"tag\">Bridging financial gaps, building brighter futures</p></div>" +
     '<div class="authform">' +
     '<input class="auth-in" placeholder="ID number" value="' + esc(ui.loginId) + '" oninput="ui.loginId=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
-    '<input class="auth-in" type="password" placeholder="Password" value="' + esc(ui.loginPw) + '" oninput="ui.loginPw=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
+    '<div class="password-wrap auth-password-wrap"><input id="login-password" class="auth-in" type="password" placeholder="Password" value="' + esc(ui.loginPw) + '" oninput="ui.loginPw=this.value" onkeydown="if(event.key===\'Enter\')doLogin()"><button class="password-toggle auth-password-toggle" type="button" data-toggle-for="login-password" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility(\'login-password\')">' + eyeIcon(false) + '</button></div>' +
     (ui.loginError ? '<p class="autherr">' + esc(ui.loginError) + "</p>" : "") +
     '<button class="b b-gold b-block big" onclick="doLogin()">Log in</button>' +
     '<p class="authalt">New to UniHub? <button class="linkbtn" onclick="openSignup()">Create account</button></p></div></div>';
@@ -456,7 +472,12 @@ function renderSignup() {
   const s = ui.signup;
   const staff = s.role !== "student";
   const f = function (label, key, type, ph) {
-    return '<div class="field"><label>' + label + '</label><input class="in" type="' + (type || "text") + '" placeholder="' + (ph || "") + '" value="' + esc(s[key]) + '" oninput="ui.signup.' + key + '=this.value"></div>';
+    const inputId = "signup-" + key;
+    const input = '<input id="' + inputId + '" class="in" type="' + (type || "text") + '" placeholder="' + (ph || "") + '" value="' + esc(s[key]) + '" oninput="ui.signup.' + key + '=this.value">';
+    const control = type === "password"
+      ? '<div class="password-wrap">' + input + '<button class="password-toggle" type="button" data-toggle-for="' + inputId + '" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility(\'' + inputId + '\')">' + eyeIcon(false) + '</button></div>'
+      : input;
+    return '<div class="field"><label>' + label + '</label>' + control + '</div>';
   };
   const body =
     '<div class="card pad formcard">' +
@@ -470,7 +491,7 @@ function renderSignup() {
     f("Email", "email", "email", "you@ksu.edu.ph") +
     f("Password", "password", "password", "At least 4 characters") +
     f("Confirm password", "confirm", "password", "Re-enter password") +
-    (staff ? f("Staff access code", "code", "text", "Given by your office head") + '<p class="small">Staff accounts need the access code issued by the university.</p>' : "") +
+    (staff ? f("Staff authorization password", "code", "password", "Required to create staff accounts") + '<p class="small">Only authorized group members should know this password. Student accounts do not need it.</p>' : "") +
     '<label class="agree"><input type="checkbox"' + (s.agree ? " checked" : "") + ' onchange="ui.signup.agree=this.checked"><span>I agree that UniHub may use my mobile number and email only for account verification and follow-up on my requests (Data Privacy Act of 2012).</span></label>' +
     (s.error ? '<p class="formerr">' + esc(s.error) + "</p>" : "") +
     '<button class="b b-accent b-block big" onclick="doSignup()">Create account</button>' +
@@ -493,7 +514,7 @@ function doSignup() {
   else if (!validEmail(email)) err = "Enter a valid email address.";
   else if (s.password.length < 4) err = "Password must be at least 4 characters.";
   else if (s.password !== s.confirm) err = "Passwords do not match.";
-  else if (s.role !== "student" && s.code.trim() !== STAFF_CODE) err = "Incorrect staff access code.";
+  else if (s.role !== "student" && s.code.trim() !== STAFF_CODE) err = "Incorrect staff authorization password. Staff account creation is restricted.";
   else if (!s.agree) err = "Please accept the data privacy notice to continue.";
   if (err) { s.error = err; render(); return; }
   db.accounts.push({ id: id, role: s.role, name: name, mobile: mobile, email: email, password: s.password, photo: null });
@@ -1227,10 +1248,37 @@ function markRefunded(id) {
 function profileScreen() {
   const u = me();
   const body = '<div class="card pad profilecard">' + avatar(u, 88) + '<p class="ttl big mt">' + esc(u.name) + '</p><p class="sub">ID: ' + esc(u.id) + '</p><span class="tag t-role">' + ROLES[u.role].label + "</span></div>" +
-    '<div class="card pad"><div class="inforow">' + icon("phone", 16) + '<div><p class="small">Mobile number</p><p class="ttl">' + esc(u.mobile || "Not set") + '</p></div></div><div class="inforow">' + icon("mail", 16) + '<div><p class="small">Email</p><p class="ttl">' + esc(u.email || "Not set") + "</p></div></div></div>" +
+    '<div class="card pad"><div class="inforow">' + icon("phone", 16) + '<div><p class="small">Mobile number</p><p class="ttl">' + esc(u.mobile || "Not set") + '</p></div></div><div class="inforow">' + icon("mail", 16) + '<div><p class="small">Email</p><p class="ttl">' + esc(u.email || "Not set") + '</p></div></div></div>' +
     '<button class="b b-accent b-block big" onclick="openProfileEdit()">' + icon("pencil", 14) + " Edit profile</button>" +
+    (u.role === "student" ? '<div class="card pad"><p class="ttl">Testing data</p><p class="sub">Remove your student account and the requests, maintenance reports, RSVPs, and personal notifications you created while testing. Shared rooms and events will remain.</p><button class="b b-danger b-block" onclick="clearMyTestData()">Clear my test data</button></div>' : "") +
     '<button class="b b-danger b-block big" onclick="logout()">' + icon("logout", 14) + " Log out</button>";
   return page(ROLES[u.role].theme, header("Profile"), body);
+}
+function clearMyTestData() {
+  const u = me();
+  if (!u || u.role !== "student") return;
+  const id = u.id;
+  if (!confirm("Clear your test data? This will permanently delete your student account and your dorm requests, maintenance reports, event RSVPs, and registrar requests from this browser. You will need to create a new account to use UniHub again. Shared rooms, events, and other accounts will not be deleted.")) return;
+
+  db.accounts = db.accounts.filter(function (a) { return a.id !== id; });
+  db.rooms = db.rooms.map(function (r) {
+    if (r.occupantId === id) r.occupantId = null;
+    return r;
+  });
+  db.roomRequests = db.roomRequests.filter(function (r) { return r.studentId !== id; });
+  db.maintenance = db.maintenance.filter(function (m) { return m.studentId !== id; });
+  db.rsvps = db.rsvps.filter(function (r) { return r.studentId !== id; });
+  db.registrar = db.registrar.filter(function (r) { return r.studentId !== id; });
+  db.notifications = db.notifications.filter(function (n) {
+    return n.to !== id && n.userId !== id && n.accountId !== id;
+  });
+  saveDB();
+  ui.userId = null;
+  setSession(null);
+  ui.screen = "login";
+  ui.loginId = ""; ui.loginPw = ""; ui.loginError = "";
+  render(true);
+  toast("Your test data was cleared.");
 }
 function openProfileEdit() {
   const u = me();

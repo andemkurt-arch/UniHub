@@ -201,6 +201,14 @@ select.in { max-width: 100%; text-overflow: ellipsis; }
 .auth-in { background: rgba(255,255,255,.1); color: white; border: none; border-radius: 12px; padding: 14px 16px; font-size: 14px; outline: none; }
 .auth-in::placeholder { color: rgba(255,255,255,.4); }
 .auth-in:focus { background: rgba(255,255,255,.15); }
+.password-wrap { position: relative; width: 100%; min-width: 0; }
+.password-wrap > input { width: 100%; padding-right: 46px; }
+.password-toggle { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.password-toggle svg { width: 19px; height: 19px; }
+.password-toggle:focus-visible { outline: 2px solid var(--accent-mid, var(--gold-mid)); outline-offset: 1px; }
+.auth-password-wrap .auth-in { padding-right: 46px; }
+.auth-password-toggle { color: rgba(255,255,255,.75); right: 7px; }
+.auth-password-toggle:hover { color: white; }
 .autherr { color: #F4A99C; font-size: 12px; }
 .authalt { color: rgba(255,255,255,.65); font-size: 13px; text-align: center; }
 .authalt .linkbtn { color: var(--gold-mid); font-size: 13px; }
