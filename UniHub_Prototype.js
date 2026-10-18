@@ -144,55 +144,62 @@ function resizeImage(file, maxDim, quality, square) {
 let db;
  
 function seedDB() {
-  const mk = function (id, role, name, mobile, email) {
-    return { id: id, role: role, name: name, mobile: mobile, email: email, password: "1234", photo: null };
-  };
   return {
-    accounts: [
-      mk("STU-0001", "student", "Juan Dela Cruz", "09171234567", "juan.delacruz@student.ksu.edu.ph"),
-      mk("STU-0002", "student", "Maria Santos", "09181234567", "maria.santos@student.ksu.edu.ph"),
-      mk("STU-0003", "student", "Pedro Garcia", "09191234567", "pedro.garcia@student.ksu.edu.ph"),
-      mk("DRM-0001", "dorm", "Ana Reyes", "09201234567", "ana.reyes@ksu.edu.ph"),
-      mk("EVT-0001", "event", "Carlo Mendoza", "09211234567", "carlo.mendoza@ksu.edu.ph"),
-      mk("REG-0001", "registrar", "Liza Ramos", "09221234567", "liza.ramos@ksu.edu.ph")
-    ],
+    accounts: [],
     rooms: [
-      { id: "B1-102", building: "Bulanao Hall", floor: "1st Floor", beds: 2, price: 1800, occupantId: "STU-0002" },
+      { id: "B1-102", building: "Bulanao Hall", floor: "1st Floor", beds: 2, price: 1800, occupantId: null },
       { id: "B2-201", building: "Bulanao Hall", floor: "2nd Floor", beds: 2, price: 1800, occupantId: null },
       { id: "B2-305", building: "Bulanao Hall", floor: "3rd Floor", beds: 4, price: 1200, occupantId: null },
       { id: "R1-108", building: "Rizal Residence", floor: "1st Floor", beds: 2, price: 2000, occupantId: null },
       { id: "R2-210", building: "Rizal Residence", floor: "2nd Floor", beds: 3, price: 1500, occupantId: null },
       { id: "R3-301", building: "Rizal Residence", floor: "3rd Floor", beds: 2, price: 1900, occupantId: null }
     ],
-    roomRequests: [
-      { id: "rq_seed2", studentId: "STU-0003", roomId: "B2-201", status: "Pending", date: isoDaysFromNow(-1), note: "" },
-      { id: "rq_seed1", studentId: "STU-0002", roomId: "B1-102", status: "Approved", date: isoDaysFromNow(-20), note: "" }
-    ],
-    maintenance: [
-      { id: "mt_seed1", studentId: "STU-0002", roomId: "B1-102", text: "Leaking faucet in the bathroom.", photo: null, status: "Pending", date: isoDaysFromNow(-1) }
-    ],
-    events: [
-      { id: "ev_seed1", title: "Freshmen Orientation Day", date: isoDaysFromNow(0), time: "08:00", place: "University Gym", tag: "Academic", description: "Welcome program and campus tour for incoming freshmen.", status: "Active", createdBy: "EVT-0001" },
-      { id: "ev_seed2", title: "Intramurals Opening", date: isoDaysFromNow(4), time: "13:00", place: "Main Oval", tag: "Sports", description: "Parade of colleges and opening ceremony.", status: "Active", createdBy: "EVT-0001" },
-      { id: "ev_seed3", title: "Career Fair 2026", date: isoDaysFromNow(11), time: "09:00", place: "Convention Hall", tag: "Career", description: "Meet partner companies and submit your resume.", status: "Active", createdBy: "EVT-0001" },
-      { id: "ev_seed4", title: "Acoustic Night", date: isoDaysFromNow(18), time: "18:30", place: "Student Center", tag: "Culture", description: "An evening of live student performances.", status: "Active", createdBy: "EVT-0001" }
-    ],
-    rsvps: [
-      { id: "rv_seed1", eventId: "ev_seed1", studentId: "STU-0002", attended: false },
-      { id: "rv_seed2", eventId: "ev_seed1", studentId: "STU-0003", attended: false }
-    ],
-    registrar: [
-      { id: "rg_seed1", studentId: "STU-0002", type: "Transcript of Records (TOR)", fee: 150, payment: "GCash", paymentStatus: "Paid", purpose: "Job application", date: isoDaysFromNow(-1), status: "Pending" }
-    ],
+    roomRequests: [],
+    maintenance: [],
+    events: [],
+    rsvps: [],
+    registrar: [],
     notifications: []
   };
 }
+function removeLegacyDemoData() {
+  const demoIds = ["STU-0001", "STU-0002", "STU-0003", "DRM-0001", "EVT-0001", "REG-0001"];
+  const demoIdSet = new Set(demoIds);
+  const demoEventIds = ["ev_seed1", "ev_seed2", "ev_seed3", "ev_seed4"];
+  const demoEventSet = new Set(demoEventIds);
+
+  db.accounts = (db.accounts || []).filter(function (a) { return !demoIdSet.has(a.id); });
+  db.rooms = (db.rooms || []).map(function (r) {
+    if (demoIdSet.has(r.occupantId)) r.occupantId = null;
+    return r;
+  });
+  db.roomRequests = (db.roomRequests || []).filter(function (r) {
+    return !demoIdSet.has(r.studentId) && !String(r.id || "").startsWith("rq_seed");
+  });
+  db.maintenance = (db.maintenance || []).filter(function (m) {
+    return !demoIdSet.has(m.studentId) && !String(m.id || "").startsWith("mt_seed");
+  });
+  db.events = (db.events || []).filter(function (e) {
+    return !demoIdSet.has(e.createdBy) && !demoEventSet.has(e.id);
+  });
+  db.rsvps = (db.rsvps || []).filter(function (r) {
+    return !demoIdSet.has(r.studentId) && !demoEventSet.has(r.eventId) && !String(r.id || "").startsWith("rv_seed");
+  });
+  db.registrar = (db.registrar || []).filter(function (r) {
+    return !demoIdSet.has(r.studentId) && !String(r.id || "").startsWith("rg_seed");
+  });
+  db.notifications = (db.notifications || []).filter(function (n) {
+    return !demoIdSet.has(n.userId) && !demoIdSet.has(n.accountId);
+  });
+}
+
 function loadDB() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) { db = JSON.parse(raw); return; }
+    if (raw) { db = JSON.parse(raw); removeLegacyDemoData(); saveDB(); return; }
   } catch (e) { /* fall through and seed */ }
   db = seedDB();
+  removeLegacyDemoData();
   saveDB();
 }
 function saveDB() {
@@ -412,9 +419,7 @@ function renderLogin() {
     '<input class="auth-in" type="password" placeholder="Password" value="' + esc(ui.loginPw) + '" oninput="ui.loginPw=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
     (ui.loginError ? '<p class="autherr">' + esc(ui.loginError) + "</p>" : "") +
     '<button class="b b-gold b-block big" onclick="doLogin()">Log in</button>' +
-    '<p class="authalt">New to UniHub? <button class="linkbtn" onclick="openSignup()">Create account</button></p></div>' +
-    '<div class="demo"><p>Demo accounts (password 1234)</p><p>STU-0001 &middot; DRM-0001 &middot; EVT-0001 &middot; REG-0001</p>' +
-    '<button class="linkbtn dim" onclick="resetDemo()">Reset demo data</button></div></div>';
+    '<p class="authalt">New to UniHub? <button class="linkbtn" onclick="openSignup()">Create account</button></p></div></div>';
 }
 function doLogin() {
   const id = (ui.loginId || "").trim().toUpperCase();
@@ -444,14 +449,6 @@ function logout() {
   ui.screen = "login";
   render(true);
 }
-function resetDemo() {
-  if (!confirm("Reset all demo data? Accounts you created and all requests will be erased.")) return;
-  try { localStorage.removeItem(STORE_KEY); localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
-  db = seedDB(); saveDB();
-  ui.signup = blankSignup(); ui.loginId = ""; ui.loginPw = ""; ui.loginError = "";
-  render(true);
-  toast("Demo data was reset.");
-}
 function openSignup() { ui.signup = blankSignup(); ui.screen = "signup"; render(true); }
 function setSignupRole(r) { ui.signup.role = r; render(); }
  
@@ -473,7 +470,7 @@ function renderSignup() {
     f("Email", "email", "email", "you@ksu.edu.ph") +
     f("Password", "password", "password", "At least 4 characters") +
     f("Confirm password", "confirm", "password", "Re-enter password") +
-    (staff ? f("Staff access code", "code", "text", "Given by your office head") + '<p class="small">Staff accounts need the access code issued by the university. (Demo code: ' + STAFF_CODE + ")</p>" : "") +
+    (staff ? f("Staff access code", "code", "text", "Given by your office head") + '<p class="small">Staff accounts need the access code issued by the university.</p>' : "") +
     '<label class="agree"><input type="checkbox"' + (s.agree ? " checked" : "") + ' onchange="ui.signup.agree=this.checked"><span>I agree that UniHub may use my mobile number and email only for account verification and follow-up on my requests (Data Privacy Act of 2012).</span></label>' +
     (s.error ? '<p class="formerr">' + esc(s.error) + "</p>" : "") +
     '<button class="b b-accent b-block big" onclick="doSignup()">Create account</button>' +
@@ -1293,6 +1290,8 @@ loadDB();
     ui.userId = su.id;
     ui.dormTab = (su.role === "student" && activeRoomReq(su.id)) ? "room" : "browse";
     ui.screen = "home";
+  } else if (sid) {
+    setSession(null);
   }
 })();
 render(true);
