@@ -193,13 +193,48 @@ function removeLegacyDemoData() {
   });
 }
 
+function ensureSampleEvents() {
+  // Add five realistic campus-event examples for first-time testing.
+  // Fixed IDs prevent duplicates when the page is refreshed.
+  const samples = [
+    { id: "sample_event_academic", title: "Student Academic Seminar", days: 3, time: "09:00", place: "CEIT Function Hall", tag: "Academic", description: "A student seminar featuring study strategies, academic planning, and helpful learning resources." },
+    { id: "sample_event_sports", title: "Interdepartmental Sports Day", days: 7, time: "08:00", place: "University Gymnasium", tag: "Sports", description: "A friendly sports event where students can participate, support their departments, and practice teamwork." },
+    { id: "sample_event_career", title: "Career and IT Skills Workshop", days: 12, time: "13:00", place: "Computer Laboratory 1", tag: "Career", description: "A hands-on workshop about IT career paths, resume preparation, and essential workplace skills." },
+    { id: "sample_event_culture", title: "Campus Culture and Arts Day", days: 18, time: "10:00", place: "University Activity Center", tag: "Culture", description: "A campus celebration showcasing student performances, creative works, and cultural presentations." },
+    { id: "sample_event_other", title: "Campus Clean-Up Drive", days: 25, time: "07:30", place: "Main Campus Grounds", tag: "Other", description: "A volunteer activity encouraging students to help keep the campus clean, safe, and welcoming." }
+  ];
+  db.events = db.events || [];
+  samples.forEach(function (sample) {
+    if (!db.events.some(function (e) { return e.id === sample.id; })) {
+      db.events.push({
+        id: sample.id,
+        title: sample.title,
+        date: isoDaysFromNow(sample.days),
+        time: sample.time,
+        place: sample.place,
+        tag: sample.tag,
+        description: sample.description,
+        status: "Active",
+        createdBy: "system_sample"
+      });
+    }
+  });
+}
+
 function loadDB() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) { db = JSON.parse(raw); removeLegacyDemoData(); saveDB(); return; }
+    if (raw) {
+      db = JSON.parse(raw);
+      removeLegacyDemoData();
+      ensureSampleEvents();
+      saveDB();
+      return;
+    }
   } catch (e) { /* fall through and seed */ }
   db = seedDB();
   removeLegacyDemoData();
+  ensureSampleEvents();
   saveDB();
 }
 function saveDB() {
