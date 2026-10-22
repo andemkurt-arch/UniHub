@@ -1,8 +1,7 @@
 /* ==========================================================================
    UniHub prototype - plain HTML / CSS / JS
    Roles: student | dorm (Dorm Staff) | event (Event Handler) | registrar (Registrar Staff)
-   All data is kept in localStorage so a student's actions show up for staff
-   (log out, log in as staff) and vice versa.
+   Supabase stores shared room, maintenance, event, notification, and dorm log records; localStorage retains UI/demo state.
    ========================================================================== */
  
 /* ---------- constants ---------- */
@@ -32,12 +31,12 @@ const ROLES = {
   event: { label: "Event Handler", theme: "event" },
   registrar: { label: "Registrar Staff", theme: "registrar" }
 };
-const SIGNUP_ROLES = [["student", "Student"], ["dorm", "Dorm Staff"], ["event", "Event Handler"], ["registrar", "Registrar Staff"]];
+const SIGNUP_ROLES = [["student", "Student"]];
  
 /* [screen key, label, icon] */
 const NAV = {
   student: [["home", "Home", "home"], ["dorm", "Dorm", "building"], ["events", "Events", "calendar"], ["registrar", "Registrar", "file"], ["profile", "Profile", "user"]],
-  dorm: [["home", "Home", "home"], ["d_requests", "Requests", "clipboard"], ["d_maint", "Maintenance", "wrench"], ["profile", "Profile", "user"]],
+  dorm: [["home", "Home", "home"], ["d_requests", "Requests", "clipboard"], ["d_maint", "Maintenance", "wrench"], ["d_billing", "Billing", "wallet"], ["profile", "Profile", "user"]],
   event: [["home", "Home", "home"], ["e_events", "Events", "calendar"], ["e_attend", "Attendance", "users"], ["profile", "Profile", "user"]],
   registrar: [["home", "Home", "home"], ["r_requests", "Requests", "file"], ["r_payments", "Payments", "wallet"], ["profile", "Profile", "user"]]
 };
@@ -82,13 +81,14 @@ function icon(name, size) {
 }
  
 /* ---------- small helpers ---------- */
+function escAttr(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
 }
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
-function peso(n) { return "&#8369;" + Number(n).toLocaleString("en-US"); }
+function peso(n) { return "₱" + Number(n).toLocaleString("en-US"); }
 function isoOf(y, m, d) { return y + "-" + pad(m + 1) + "-" + pad(d); }
 function isoDaysFromNow(n) {
   const d = new Date();
@@ -159,6 +159,8 @@ function seedDB() {
     events: [],
     rsvps: [],
     registrar: [],
+    enrollments: [],
+    appointments: [],
     notifications: []
   };
 }
@@ -193,48 +195,13 @@ function removeLegacyDemoData() {
   });
 }
 
-function ensureSampleEvents() {
-  // Add five realistic campus-event examples for first-time testing.
-  // Fixed IDs prevent duplicates when the page is refreshed.
-  const samples = [
-    { id: "sample_event_academic", title: "Student Academic Seminar", days: 3, time: "09:00", place: "CEIT Function Hall", tag: "Academic", description: "A student seminar featuring study strategies, academic planning, and helpful learning resources." },
-    { id: "sample_event_sports", title: "Interdepartmental Sports Day", days: 7, time: "08:00", place: "University Gymnasium", tag: "Sports", description: "A friendly sports event where students can participate, support their departments, and practice teamwork." },
-    { id: "sample_event_career", title: "Career and IT Skills Workshop", days: 12, time: "13:00", place: "Computer Laboratory 1", tag: "Career", description: "A hands-on workshop about IT career paths, resume preparation, and essential workplace skills." },
-    { id: "sample_event_culture", title: "Campus Culture and Arts Day", days: 18, time: "10:00", place: "University Activity Center", tag: "Culture", description: "A campus celebration showcasing student performances, creative works, and cultural presentations." },
-    { id: "sample_event_other", title: "Campus Clean-Up Drive", days: 25, time: "07:30", place: "Main Campus Grounds", tag: "Other", description: "A volunteer activity encouraging students to help keep the campus clean, safe, and welcoming." }
-  ];
-  db.events = db.events || [];
-  samples.forEach(function (sample) {
-    if (!db.events.some(function (e) { return e.id === sample.id; })) {
-      db.events.push({
-        id: sample.id,
-        title: sample.title,
-        date: isoDaysFromNow(sample.days),
-        time: sample.time,
-        place: sample.place,
-        tag: sample.tag,
-        description: sample.description,
-        status: "Active",
-        createdBy: "system_sample"
-      });
-    }
-  });
-}
-
 function loadDB() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) {
-      db = JSON.parse(raw);
-      removeLegacyDemoData();
-      ensureSampleEvents();
-      saveDB();
-      return;
-    }
+    if (raw) { db = JSON.parse(raw); db.enrollments = db.enrollments || []; db.appointments = db.appointments || []; removeLegacyDemoData(); saveDB(); return; }
   } catch (e) { /* fall through and seed */ }
   db = seedDB();
   removeLegacyDemoData();
-  ensureSampleEvents();
   saveDB();
 }
 function saveDB() {
@@ -245,12 +212,18 @@ function getSession() { try { return localStorage.getItem(SESSION_KEY); } catch 
 function setSession(id) { try { if (id) localStorage.setItem(SESSION_KEY, id); else localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ } }
  
 /* ---------- lookups ---------- */
-function userById(id) { return db.accounts.find(function (a) { return a.id === id; }); }
+function userById(id) {
+  return db.accounts.find(function (a) {
+    return String(a.id) === String(id) ||
+           String(a.authId || "") === String(id) ||
+           String(a.studentId || "") === String(id);
+  });
+}
 function me() { return userById(ui.userId); }
 function myRole() { return me().role; }
 function nameOf(id) { const u = userById(id); return u ? u.name : id; }
 function roomById(id) { return db.rooms.find(function (r) { return r.id === id; }); }
-function eventById(id) { return db.events.find(function (e) { return e.id === id; }); }
+function eventById(id) { return db.events.find(function (e) { return String(e.id) === String(id); }); }
 function activeRoomReq(sid) { return db.roomRequests.find(function (r) { return r.studentId === sid && ACTIVE_ROOM.indexOf(r.status) !== -1; }); }
 function eventPhase(e) {
   if (e.status === "Cancelled") return "Cancelled";
@@ -265,6 +238,24 @@ function nextEvent() {
 }
  
 /* ---------- notifications ---------- */
+/* Pull notifications for the signed-in Supabase profile. Inserts are generated by
+   trusted database triggers; the browser never gets permission to create arbitrary notices. */
+async function refreshSupabaseNotifications() {
+  if (!window.unihubSupabase || !me() || !me().authId) return;
+  const { data, error } = await window.unihubSupabase
+    .from("notifications")
+    .select("id,recipient_id,message,is_read,created_at")
+    .eq("recipient_id", me().authId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  const remote = (data || []).map(function (n) {
+    return { id: "sb_" + n.id, dbId: n.id, to: me().id, text: n.message || "Notification", date: (n.created_at || "").slice(0, 10) || todayISO(), read: !!n.is_read, remote: true };
+  });
+  const keepLocal = (db.notifications || []).filter(function (n) { return !n.remote; });
+  db.notifications = remote.concat(keepLocal);
+  saveDB();
+}
 function notify(to, text) {
   db.notifications.unshift({ id: uid("n"), to: to, text: text, date: todayISO(), read: false });
 }
@@ -303,6 +294,7 @@ const ui = {
   eventForm: blankEventForm(),
   profileEdit: { mobile: "", email: "", photo: undefined, error: "" },
   notifUnread: [],
+  billingData: { loaded:false, loading:false, error:"", rows:[], students:[], rooms:[] },
   viewer: null
 };
  
@@ -361,7 +353,8 @@ function avatar(u, size) {
 }
 function person(id, rightHtml) {
   const u = userById(id);
-  const nm = u ? u.name : id;
+  const request = (db.roomRequests || []).find(function (r) { return r.studentId === id && r.studentName; });
+  const nm = u ? u.name : (request ? request.studentName : id);
   const shown = u || { name: nm, photo: null };
   return '<div class="row between"><div class="person">' + avatar(shown, 36) + '<div><p class="pname">' + esc(nm) + '</p><p class="psub">' + esc(id) + "</p></div></div>" + (rightHtml || "") + "</div>";
 }
@@ -401,6 +394,7 @@ function renderScreen(s) {
     case "registrar": return registrarStudent();
     case "d_requests": return dormRequests();
     case "d_maint": return dormMaintenance();
+    case "d_billing": return dormBillingScreen();
     case "e_events": return eventManage();
     case "e_form": return eventFormScreen();
     case "e_attend": return eventAttendance();
@@ -466,19 +460,38 @@ function renderLogin() {
     '<div class="brand"><div class="emblem"><span class="fl">' + icon("flame", 20) + '</span><span class="bk">' + icon("book", 18) + "</span></div>" +
     "<h1>UniHub</h1><p class=\"u\">Kalinga State University</p><p class=\"tag\">Bridging financial gaps, building brighter futures</p></div>" +
     '<div class="authform">' +
-    '<input class="auth-in" placeholder="ID number" value="' + esc(ui.loginId) + '" oninput="ui.loginId=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
+    '<input class="auth-in" placeholder="Email address" type="email" value="' + esc(ui.loginId) + '" oninput="ui.loginId=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
     '<div class="password-wrap auth-password-wrap"><input id="login-password" class="auth-in" type="password" placeholder="Password" value="' + esc(ui.loginPw) + '" oninput="ui.loginPw=this.value" onkeydown="if(event.key===\'Enter\')doLogin()"><button class="password-toggle auth-password-toggle" type="button" data-toggle-for="login-password" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility(\'login-password\')">' + eyeIcon(false) + '</button></div>' +
     (ui.loginError ? '<p class="autherr">' + esc(ui.loginError) + "</p>" : "") +
     '<button class="b b-gold b-block big" onclick="doLogin()">Log in</button>' +
     '<p class="authalt">New to UniHub? <button class="linkbtn" onclick="openSignup()">Create account</button></p></div></div>';
 }
-function doLogin() {
-  const id = (ui.loginId || "").trim().toUpperCase();
+async function doLogin() {
+  const email = (ui.loginId || "").trim().toLowerCase();
   const pw = ui.loginPw || "";
-  if (!id || !pw) { ui.loginError = "Enter your ID number and password."; render(); return; }
-  const u = db.accounts.find(function (a) { return a.id.toUpperCase() === id; });
-  if (!u || u.password !== pw) { ui.loginError = "Incorrect ID number or password."; render(); return; }
-  startSession(u);
+  if (!email || !pw) { ui.loginError = "Enter your email address and password."; render(); return; }
+  if (!window.unihubSupabase) { ui.loginError = "Supabase is not configured. Check supabase-config.js."; render(); return; }
+  try {
+    ui.loginError = "Signing in…"; render();
+    const { data, error } = await window.unihubSupabase.auth.signInWithPassword({ email, password: pw });
+    if (error) throw error;
+    const { data: profile, error: profileError } = await window.unihubSupabase.from("profiles").select("id,student_id,role,full_name,mobile,email").eq("id", data.user.id).single();
+    if (profileError) throw new Error("Signed in, but no matching profile was found. Ask the administrator to create/check your profiles row. " + profileError.message);
+    const roleMap = { student: "student", dorm_staff: "dorm", event_staff: "event", registrar_staff: "registrar" };
+    const u = { id: profile.student_id, authId: profile.id, role: roleMap[profile.role] || "student", name: profile.full_name || profile.student_id, mobile: profile.mobile || "", email: profile.email || email, photo: null };
+    const existing = db.accounts.findIndex(a => a.id === u.id);
+    if (existing >= 0) db.accounts[existing] = u; else db.accounts.push(u);
+    ui.userId = u.id;
+    ui.loginError = ""; ui.loginPw = "";
+    ui.dormTab = (u.role === "student" && activeRoomReq(u.id)) ? "room" : "browse";
+    ui.regTab = "new"; ui.maint = { note: "", photo: null, error: "" }; ui.reg = { docIdx: 0, payKey: null, purpose: "" };
+    ui.dFilter = "pending"; ui.mFilter = "pending"; ui.rFilter = "pending"; ui.mapOpen = null; ui.cal.selected = null;
+    setSession(u.id); ui.screen = "home";
+    try { await refreshSupabaseDormData(); await refreshSupabaseEventData(); await refreshSupabaseNotifications(); } catch (syncError) { console.warn("Could not load Supabase data", syncError); toast("Signed in, but some data could not be loaded: " + (syncError.message || "check Supabase policies")); }
+    render(true); toast("Welcome, " + u.name.split(" ")[0] + "!");
+  } catch (e) {
+    ui.loginError = e.message || "Sign-in failed. Check your email and password."; render();
+  }
 }
 function startSession(u) {
   ui.userId = u.id;
@@ -495,10 +508,8 @@ function startSession(u) {
   toast("Welcome, " + u.name.split(" ")[0] + "!");
 }
 function logout() {
-  ui.userId = null;
-  setSession(null);
-  ui.screen = "login";
-  render(true);
+  if (window.unihubSupabase) window.unihubSupabase.auth.signOut().catch(function (e) { console.warn("Supabase sign-out failed", e); });
+  ui.userId = null; setSession(null); ui.screen = "login"; render(true);
 }
 function openSignup() { ui.signup = blankSignup(); ui.screen = "signup"; render(true); }
 function setSignupRole(r) { ui.signup.role = r; render(); }
@@ -535,40 +546,50 @@ function renderSignup() {
 }
 function validMobile(m) { return /^(09|\+639)\d{9}$/.test(m.replace(/[\s-]/g, "")); }
 function validEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
-function doSignup() {
+async function doSignup() {
   const s = ui.signup;
-  const name = s.name.trim();
-  const id = s.id.trim().toUpperCase();
-  const mobile = s.mobile.replace(/[\s-]/g, "");
-  const email = s.email.trim();
+  const name = s.name.trim(); const id = s.id.trim().toUpperCase();
+  const mobile = s.mobile.replace(/[\s-]/g, ""); const email = s.email.trim().toLowerCase();
   let err = "";
   if (name.length < 3) err = "Enter your full name.";
   else if (!/^[A-Z0-9-]{3,20}$/.test(id)) err = "ID number must be 3-20 letters, numbers, or dashes.";
-  else if (db.accounts.some(function (a) { return a.id.toUpperCase() === id; })) err = "That ID number already has an account.";
   else if (!validMobile(mobile)) err = "Enter a valid mobile number (e.g. 09171234567).";
   else if (!validEmail(email)) err = "Enter a valid email address.";
-  else if (s.password.length < 4) err = "Password must be at least 4 characters.";
+  else if (s.password.length < 8) err = "Password must be at least 8 characters.";
   else if (s.password !== s.confirm) err = "Passwords do not match.";
-  else if (s.role !== "student" && s.code.trim() !== STAFF_CODE) err = "Incorrect staff authorization password. Staff account creation is restricted.";
   else if (!s.agree) err = "Please accept the data privacy notice to continue.";
   if (err) { s.error = err; render(); return; }
-  db.accounts.push({ id: id, role: s.role, name: name, mobile: mobile, email: email, password: s.password, photo: null });
-  saveDB();
-  ui.loginId = id; ui.loginPw = ""; ui.loginError = "";
-  ui.signup = blankSignup();
-  ui.screen = "login";
-  render(true);
-  toast("Account created. You can now log in.");
+  if (!window.unihubSupabase) { s.error = "Supabase is not configured. Check supabase-config.js."; render(); return; }
+  try {
+    s.error = "Creating account…"; render();
+    const { data, error } = await window.unihubSupabase.auth.signUp({ email, password: s.password, options: { data: { full_name: name, student_id: id } } });
+    if (error) throw error;
+    if (!data.user) throw new Error("Supabase did not return a user. Please try again.");
+    // A profile row is created explicitly. RLS must allow an authenticated user to insert only their own id.
+    if (data.session) {
+      const { error: profileError } = await window.unihubSupabase.from("profiles").insert({ id: data.user.id, student_id: id, role: "student", full_name: name, mobile, email });
+      if (profileError) throw new Error("Auth account was created, but profile creation failed. Ask the administrator to check profiles RLS policies. " + profileError.message);
+    }
+    ui.loginId = email; ui.loginPw = ""; ui.loginError = ""; ui.signup = blankSignup(); ui.screen = "login"; render(true);
+    toast(data.session ? "Account created. Log in with your email." : "Check your email to confirm your account, then log in.");
+  } catch (e) { s.error = e.message || "Could not create account."; render(); }
 }
- 
+
 /* ==========================================================================
    Notifications (all roles)
    ========================================================================== */
-function openNotifications() {
+async function openNotifications() {
+  try { await refreshSupabaseNotifications(); }
+  catch (e) { console.warn("Could not refresh notifications", e); }
   const mine = myNotifs();
   ui.notifUnread = mine.filter(function (n) { return !n.read; }).map(function (n) { return n.id; });
+  const remoteIds = mine.filter(function (n) { return n.remote && !n.read && n.dbId; }).map(function (n) { return n.dbId; });
   mine.forEach(function (n) { n.read = true; });
   saveDB();
+  if (window.unihubSupabase && me() && me().authId && remoteIds.length) {
+    const { error } = await window.unihubSupabase.from("notifications").update({ is_read: true }).in("id", remoteIds).eq("recipient_id", me().authId);
+    if (error) { toast("Notifications opened, but read status could not be saved: " + error.message); }
+  }
   goTo("notifications");
 }
 function notificationsScreen() {
@@ -620,8 +641,9 @@ function dormStudent() {
   const u = me();
   const rr = activeRoomReq(u.id);
   const t = ui.dormTab;
+  if (t === "billing") return dormBillingScreen();
   const body = t === "room" ? dormMyRoom(u, rr) : t === "browse" ? dormBrowse(u, rr) : dormMaintStudent(u, rr);
-  return page("dorm", header("Dorm services", { tabs: [["room", "My room"], ["browse", "Browse"], ["maintenance", "Maintenance"]], active: t, onTab: "setDormTab" }), body);
+  return page("dorm", header("Dorm services", { tabs: [["room", "My room"], ["browse", "Browse"], ["maintenance", "Maintenance"], ["billing", "Billing"]], active: t, onTab: "setDormTab" }), body);
 }
 function dormMyRoom(u, rr) {
   let h = "";
@@ -656,34 +678,95 @@ function dormBrowse(u, rr) {
   });
   return h;
 }
-function requestRoom(roomId) {
-  const u = me();
-  const room = roomById(roomId);
+async function refreshSupabaseDormData() {
+  if (!window.unihubSupabase || !me() || !me().authId) return;
+  const client = window.unihubSupabase;
+  const { data: rooms, error: roomsError } = await client.from("rooms").select("id,building,floor,beds,price,occupant_id").order("id");
+  if (roomsError) throw roomsError;
+  db.rooms = (rooms || []).map(function (r) { return { id: r.id, building: r.building || "", floor: r.floor || "", beds: r.beds == null ? "" : r.beds, price: Number(r.price || 0), occupantId: r.occupant_id || null }; });
+  const { data: requests, error: requestsError } = await client.from("room_requests").select("id,student_id,room_id,status,note,requested_at,profiles(student_id,full_name)").order("requested_at", { ascending: false });
+  if (requestsError) throw requestsError;
+  db.roomRequests = (requests || []).map(function (r) {
+    const profile = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
+    return { id: r.id, studentId: profile && profile.student_id ? profile.student_id : (r.student_id === me().authId ? me().id : r.student_id), studentName: profile && profile.full_name ? profile.full_name : "Student", roomId: r.room_id || "Room unavailable", status: r.status || "Pending", note: r.note || "", date: (r.requested_at || "").slice(0, 10) || todayISO(), authStudentId: r.student_id };
+  });
+  const { data: tickets, error: ticketsError } = await client.from("maintenance_requests").select("id,student_id,room_id,description,photo_url,status,staff_note,created_at,profiles(student_id,full_name)").order("created_at", { ascending: false });
+  if (ticketsError) throw ticketsError;
+  db.maintenance = (tickets || []).map(function (t) {
+    const profile = Array.isArray(t.profiles) ? t.profiles[0] : t.profiles;
+    return { id: t.id, studentId: profile && profile.student_id ? profile.student_id : (t.student_id === me().authId ? me().id : t.student_id), studentName: profile && profile.full_name ? profile.full_name : "Student", authStudentId: t.student_id, roomId: t.room_id || "Room unavailable", text: t.description || "", photo: t.photo_url || null, status: t.status || "Pending", date: (t.created_at || "").slice(0, 10) || todayISO(), staffNote: t.staff_note || "" };
+  });
+  saveDB();
+}
+async function refreshSupabaseEventData() {
+  if (!window.unihubSupabase || !me() || !me().authId) return;
+  const client = window.unihubSupabase;
+  const { data: events, error: eventError } = await client.from("events").select("id,title,description,location,event_date,created_by,created_at").order("event_date", { ascending: true });
+  if (eventError) throw eventError;
+  db.events = (events || []).map(function (e) {
+    const dt = e.event_date ? new Date(e.event_date) : null;
+    return { id: String(e.id), dbId: e.id, title: e.title || "Untitled event", description: e.description || "", place: e.location || "Location to be announced", date: dt && !isNaN(dt.getTime()) ? [dt.getFullYear(), pad(dt.getMonth()+1), pad(dt.getDate())].join("-") : "", time: dt && !isNaN(dt.getTime()) ? pad(dt.getHours()) + ":" + pad(dt.getMinutes()) : "00:00", tag: "Other", status: "Active", createdBy: e.created_by || "" };
+  });
+  // Fetch RSVP rows separately from profiles. This avoids relying on a PostgREST
+  // relationship alias that may not be configured in every existing Supabase schema.
+  const { data: rows, error: rsvpError } = await client.from("event_rsvps")
+    .select("id,event_id,student_id,status,attendance_status,created_at")
+    .order("created_at", { ascending: false });
+  if (rsvpError) throw rsvpError;
+  const rsvpRows = rows || [];
+  const authIds = Array.from(new Set(rsvpRows.map(function (r) { return r.student_id; }).filter(Boolean)));
+  let profileByAuthId = {};
+  if (authIds.length) {
+    const { data: profiles, error: profilesError } = await client.from("profiles")
+      .select("id,student_id,full_name").in("id", authIds);
+    if (profilesError) throw new Error("Could not load attendee names from profiles: " + profilesError.message);
+    (profiles || []).forEach(function (p) { profileByAuthId[p.id] = p; });
+  }
+  db.rsvps = rsvpRows.filter(function (r) { return String(r.status || "Registered").toLowerCase() !== "cancelled"; }).map(function (r) {
+    const profile = profileByAuthId[r.student_id];
+    const isCurrentUser = me() && r.student_id === me().authId;
+    return {
+      id: r.id, eventId: String(r.event_id),
+      studentId: profile && profile.student_id ? profile.student_id : (isCurrentUser ? me().id : (r.student_id || "Unknown student")),
+      studentName: profile && profile.full_name ? profile.full_name : (isCurrentUser ? me().name : "Student profile unavailable"),
+      authStudentId: r.student_id, attended: r.attendance_status === "Present",
+      status: r.status || "Registered"
+    };
+  });
+  saveDB();
+}
+
+async function requestRoom(roomId) {
+  const u = me(); const room = roomById(roomId);
   if (!room || room.occupantId) { toast("That room is no longer available."); render(); return; }
   if (activeRoomReq(u.id)) { toast("You already have an active room request."); return; }
+  if (window.unihubSupabase && u.authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("room_requests").insert({ student_id: u.authId, room_id: roomId, status: "Pending", note: "" });
+      if (error) throw error;
+      await refreshSupabaseDormData(); ui.dormTab = "room"; toast("Room request sent to the Dorm Office."); render(true); return;
+    } catch (e) { toast("Could not save room request: " + (e.message || "Supabase error")); return; }
+  }
   db.roomRequests.unshift({ id: uid("rq"), studentId: u.id, roomId: roomId, status: "Pending", date: todayISO(), note: "" });
   notify("role:dorm", "New room request: " + u.name + " (" + u.id + ") asked for room " + roomId + ".");
-  saveDB();
-  ui.dormTab = "room";
-  toast("Room request sent to the Dorm Office.");
-  render(true);
+  saveDB(); ui.dormTab = "room"; toast("Room request sent to the Dorm Office."); render(true);
 }
-function cancelRoomReq(id) {
-  const r = db.roomRequests.find(function (x) { return x.id === id; });
-  if (!r) return;
-  const u = me();
-  if (r.status === "Pending") {
-    if (!confirm("Cancel this room request?")) return;
-    r.status = "Cancelled";
-    toast("Room request cancelled.");
-  } else if (r.status === "Approved") {
-    if (!confirm("Your room is already assigned. Send a cancellation request to the Dorm Office?")) return;
-    r.prevStatus = r.status;
-    r.status = "Cancellation requested";
-    notify("role:dorm", u.name + " (" + u.id + ") asked to cancel the approved room " + r.roomId + ".");
-    toast("Cancellation request sent.");
+async function cancelRoomReq(id) {
+  const r = db.roomRequests.find(function (x) { return x.id === id; }); if (!r) return;
+  const u = me(); let nextStatus = null;
+  if (r.status === "Pending") { if (!confirm("Cancel this room request?")) return; nextStatus = "Cancelled"; }
+  else if (r.status === "Approved") { if (!confirm("Your room is already assigned. Send a cancellation request to the Dorm Office?")) return; nextStatus = "Cancellation requested"; }
+  else return;
+  if (window.unihubSupabase && u.authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("room_requests").update({ status: nextStatus, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+      await refreshSupabaseDormData(); toast(nextStatus === "Cancelled" ? "Room request cancelled." : "Cancellation request sent."); render(); return;
+    } catch (e) { toast("Could not update request: " + (e.message || "Supabase error")); return; }
   }
-  saveDB(); render();
+  r.status = nextStatus;
+  if (nextStatus === "Cancellation requested") notify("role:dorm", u.name + " (" + u.id + ") asked to cancel the approved room " + r.roomId + ".");
+  toast(nextStatus === "Cancelled" ? "Room request cancelled." : "Cancellation request sent."); saveDB(); render();
 }
  
 /* maintenance (student) */
@@ -727,36 +810,40 @@ function attachMaintPhoto(ev) {
   });
 }
 function removeMaintPhoto() { ui.maint.photo = null; render(); }
-function submitMaintenance() {
-  const u = me();
-  const rr = activeRoomReq(u.id);
-  const text = ui.maint.note.trim();
+async function submitMaintenance() {
+  const u = me(); const rr = activeRoomReq(u.id); const text = ui.maint.note.trim();
   if (!rr || (rr.status !== "Approved" && rr.status !== "Cancellation requested")) { toast("You need an approved room first."); return; }
   if (text.length < 5) { ui.maint.error = "Please describe the issue (at least 5 characters)."; render(); return; }
+  if (window.unihubSupabase && u.authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("maintenance_requests").insert({ student_id: u.authId, room_id: rr.roomId, description: text, photo_url: ui.maint.photo || null, status: "Pending" });
+      if (error) throw error;
+      ui.maint = { note: "", photo: null, error: "" };
+      await refreshSupabaseDormData(); toast("Maintenance request submitted."); render(true); return;
+    } catch (e) { ui.maint.error = "Could not save maintenance request: " + (e.message || "Supabase error"); render(); return; }
+  }
   db.maintenance.unshift({ id: uid("mt"), studentId: u.id, roomId: rr.roomId, text: text, photo: ui.maint.photo, status: "Pending", date: todayISO() });
   notify("role:dorm", "New maintenance request from " + u.name + " (room " + rr.roomId + "): " + text.slice(0, 60));
-  ui.maint = { note: "", photo: null, error: "" };
-  saveDB();
-  toast("Maintenance request submitted.");
-  render(true);
+  ui.maint = { note: "", photo: null, error: "" }; saveDB(); toast("Maintenance request submitted."); render(true);
 }
-function cancelMaint(id) {
-  const t = db.maintenance.find(function (x) { return x.id === id; });
-  if (!t) return;
-  const u = me();
-  if (t.status === "Pending") {
-    if (!confirm("Cancel this maintenance request?")) return;
-    t.status = "Cancelled";
-    toast("Request cancelled.");
-  } else if (t.status === "In Progress") {
-    if (!confirm("Work has already started. Send a cancellation request to the Dorm Office?")) return;
-    t.prevStatus = t.status; t.status = "Cancellation requested";
-    notify("role:dorm", u.name + " asked to cancel an in-progress maintenance request (room " + t.roomId + ").");
-    toast("Cancellation request sent.");
+async function cancelMaint(id) {
+  const t = db.maintenance.find(function (x) { return x.id === id; }); if (!t) return;
+  const u = me(); let nextStatus = null;
+  if (t.status === "Pending") { if (!confirm("Cancel this maintenance request?")) return; nextStatus = "Cancelled"; }
+  else if (t.status === "In Progress") { if (!confirm("Work has already started. Send a cancellation request to the Dorm Office?")) return; nextStatus = "Cancellation requested"; }
+  else return;
+  if (window.unihubSupabase && u.authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("maintenance_requests").update({ status: nextStatus, updated_at: new Date().toISOString() }).eq("id", id).eq("student_id", u.authId);
+      if (error) throw error;
+      await refreshSupabaseDormData(); toast(nextStatus === "Cancelled" ? "Request cancelled." : "Cancellation request sent."); render(); return;
+    } catch (e) { toast("Could not update maintenance request: " + (e.message || "Supabase error")); return; }
   }
-  saveDB(); render();
+  t.status = nextStatus;
+  if (nextStatus === "Cancellation requested") notify("role:dorm", u.name + " asked to cancel an in-progress maintenance request (room " + t.roomId + ").");
+  saveDB(); toast(nextStatus === "Cancelled" ? "Request cancelled." : "Cancellation request sent."); render();
 }
- 
+
 /* ==========================================================================
    STUDENT - Events (calendar + list + RSVP + map)
    ========================================================================== */
@@ -800,8 +887,15 @@ function eventsStudent() {
 }
 function eventCardStudent(e, u) {
   const phase = eventPhase(e);
-  const rsvp = db.rsvps.find(function (r) { return r.eventId === e.id && r.studentId === u.id; });
-  const going = db.rsvps.filter(function (r) { return r.eventId === e.id; }).length;
+  // Only active registrations should control the button or attendee count.
+  const rsvp = db.rsvps.find(function (r) {
+    return String(r.eventId) === String(e.id) &&
+      (r.studentId === u.id || (u.authId && r.authStudentId === u.authId)) &&
+      String(r.status || "Registered").toLowerCase() !== "cancelled";
+  });
+  const going = db.rsvps.filter(function (r) {
+    return String(r.eventId) === String(e.id) && String(r.status || "Registered").toLowerCase() !== "cancelled";
+  }).length;
   let btn;
   if (phase === "Cancelled") btn = badge("Cancelled");
   else if (phase === "Ended") btn = rsvp && rsvp.attended ? badge("Present") : badge("Ended");
@@ -814,19 +908,66 @@ function eventCardStudent(e, u) {
     (e.description ? '<p class="small">' + esc(e.description) + "</p>" : "") + '<p class="small">' + going + " going</p></div>" + btn + "</div>" +
     (mapOpen ? '<div class="mapbox"><iframe title="Map" loading="lazy" src="https://www.google.com/maps?q=' + mapQuery(e) + '&output=embed"></iframe><a class="b b-accent b-block" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + mapQuery(e) + '">' + icon("nav", 13) + " Get directions</a></div>" : "") + "</div>";
 }
-function toggleRsvp(eventId) {
+async function toggleRsvp(eventId) {
   const u = me();
-  const e = eventById(eventId);
-  if (!e || eventPhase(e) !== "Open") { toast("This event is not open for RSVP."); render(); return; }
-  const i = db.rsvps.findIndex(function (r) { return r.eventId === eventId && r.studentId === u.id; });
-  if (i === -1) { db.rsvps.push({ id: uid("rv"), eventId: eventId, studentId: u.id, attended: false }); toast("You're going to " + e.title + "."); }
-  else { db.rsvps.splice(i, 1); toast("RSVP removed."); }
+  const e = eventById(String(eventId));
+  if (!u || !e || eventPhase(e) !== "Open") { toast("This event is not open for RSVP."); render(); return; }
+
+  // Supabase is the source of truth in connected mode. Query this student's
+  // row directly instead of relying on the cached RSVP list, which can be stale.
+  if (window.unihubSupabase && u.authId && e.dbId != null) {
+    try {
+      const client = window.unihubSupabase;
+      const { data: rows, error: readError } = await client.from("event_rsvps")
+        .select("id,status,attendance_status,created_at")
+        .eq("event_id", Number(e.dbId)).eq("student_id", u.authId)
+        .order("created_at", { ascending: false });
+      if (readError) throw readError;
+      const matches = rows || [];
+      // Some earlier tests created duplicate rows for the same event/student.
+      // Cancel every active duplicate so refresh cannot leave the button as Going.
+      const activeRows = matches.filter(function (r) { return String(r.status || "Registered").toLowerCase() !== "cancelled"; });
+      if (activeRows.length) {
+        const activeIds = activeRows.map(function (r) { return r.id; });
+        const { error } = await client.from("event_rsvps").update({ status: "Cancelled" }).in("id", activeIds);
+        if (error) throw error;
+        toast("RSVP cancelled.");
+      } else if (matches.length) {
+        const cancelled = matches[0];
+        const { error } = await client.from("event_rsvps").update({ status: "Registered", attendance_status: null })
+          .eq("id", cancelled.id);
+        if (error) throw error;
+        toast("You're registered for " + e.title + ".");
+      } else {
+        const { error } = await client.from("event_rsvps").insert({ event_id: Number(e.dbId), student_id: u.authId, status: "Registered" });
+        if (error) throw error;
+        toast("You're registered for " + e.title + ".");
+      }
+      await refreshSupabaseEventData();
+      render();
+      return;
+    } catch (err) {
+      console.error("RSVP update failed", err);
+      toast("Could not update RSVP: " + (err.message || "Supabase error"));
+      return;
+    }
+  }
+
+  // Local demo mode: update the local state and message together.
+  const i = db.rsvps.findIndex(function (r) {
+    return String(r.eventId) === String(eventId) && r.studentId === u.id && (r.status || "Registered") !== "Cancelled";
+  });
+  if (i === -1) {
+    const cancelledIndex = db.rsvps.findIndex(function (r) { return String(r.eventId) === String(eventId) && r.studentId === u.id && r.status === "Cancelled"; });
+    if (cancelledIndex >= 0) db.rsvps[cancelledIndex].status = "Registered";
+    else db.rsvps.push({ id: uid("rv"), eventId: String(eventId), studentId: u.id, attended: false, status: "Registered" });
+    toast("You're registered for " + e.title + ".");
+  } else {
+    db.rsvps[i].status = "Cancelled";
+    toast("RSVP cancelled.");
+  }
   saveDB(); render();
 }
- 
-/* ==========================================================================
-   STUDENT - Registrar
-   ========================================================================== */
 function setRegTab(t) { ui.regTab = t; render(true); }
 function selectDoc(i) { ui.reg.docIdx = i; render(); }
 function selectPayment(k) { ui.reg.payKey = k; render(); }
@@ -945,9 +1086,21 @@ function roomReqCard(r) {
   return '<div class="card pad">' + person(r.studentId, badge(r.status)) + '<div class="kv">' + kv("Room", room.id + " (" + room.building + ")") + kv("Floor / beds", room.floor + " / " + room.beds) + kv("Rate", peso(room.price) + "/mo", true) + kv("Requested", fmtDate(r.date)) + "</div>" +
     (r.note ? '<p class="small">Reason: ' + esc(r.note) + "</p>" : "") + (act ? '<div class="actions">' + act + "</div>" : "") + "</div>";
 }
-function approveRoom(id) {
+async function approveRoom(id) {
   const r = db.roomRequests.find(function (x) { return x.id === id; });
   if (!r || r.status !== "Pending") return;
+  if (window.unihubSupabase && me() && me().authId) {
+    try {
+      const room = roomById(r.roomId);
+      if (!room || room.occupantId) { toast("That room is already occupied. Refresh the page and try again."); await refreshSupabaseDormData(); render(); return; }
+      const { error: roomError } = await window.unihubSupabase.from("rooms").update({ occupant_id: r.authStudentId }).eq("id", r.roomId);
+      if (roomError) throw roomError;
+      const { error: requestError } = await window.unihubSupabase.from("room_requests").update({ status: "Approved", updated_at: new Date().toISOString() }).eq("id", id);
+      if (requestError) throw requestError;
+      await window.unihubSupabase.from("room_requests").update({ status: "Rejected", note: "Room was assigned to another student.", updated_at: new Date().toISOString() }).eq("room_id", r.roomId).eq("status", "Pending").neq("id", id);
+      await refreshSupabaseDormData(); toast("Approved. Room " + r.roomId + " is now occupied."); render(); return;
+    } catch (e) { toast("Could not approve request: " + (e.message || "Supabase error")); return; }
+  }
   const room = roomById(r.roomId);
   if (!room || room.occupantId) {
     r.status = "Rejected"; r.note = "Room is no longer available.";
@@ -965,27 +1118,50 @@ function approveRoom(id) {
   });
   saveDB(); toast("Approved. Room " + r.roomId + " is now occupied."); render();
 }
-function rejectRoom(id) {
+async function rejectRoom(id) {
   const r = db.roomRequests.find(function (x) { return x.id === id; });
   if (!r) return;
   const reason = prompt("Reason for rejecting (optional):", "");
   if (reason === null) return;
+  if (window.unihubSupabase && me() && me().authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("room_requests").update({ status: "Rejected", note: reason.trim(), updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+      await refreshSupabaseDormData(); toast("Request rejected."); render(); return;
+    } catch (e) { toast("Could not reject request: " + (e.message || "Supabase error")); return; }
+  }
   r.status = "Rejected"; r.note = reason.trim();
   notify(r.studentId, "Your request for room " + r.roomId + " was not approved." + (r.note ? " Reason: " + r.note : ""));
   saveDB(); toast("Request rejected."); render();
 }
-function confirmRoomCancel(id) {
+async function confirmRoomCancel(id) {
   const r = db.roomRequests.find(function (x) { return x.id === id; });
   if (!r) return;
   const room = roomById(r.roomId);
+  if (window.unihubSupabase && me() && me().authId) {
+    try {
+      const { error: roomError } = await window.unihubSupabase.from("rooms").update({ occupant_id: null }).eq("id", r.roomId).eq("occupant_id", r.authStudentId);
+      if (roomError) throw roomError;
+      const { error } = await window.unihubSupabase.from("room_requests").update({ status: "Cancelled", updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+      await refreshSupabaseDormData(); toast("Cancellation confirmed. Room is vacant again."); render(); return;
+    } catch (e) { toast("Could not confirm cancellation: " + (e.message || "Supabase error")); return; }
+  }
   if (room && room.occupantId === r.studentId) room.occupantId = null;
   r.status = "Cancelled"; delete r.prevStatus;
   notify(r.studentId, "Your cancellation for room " + r.roomId + " was confirmed. The room is now vacant.");
   saveDB(); toast("Cancellation confirmed. Room is vacant again."); render();
 }
-function declineRoomCancel(id) {
+async function declineRoomCancel(id) {
   const r = db.roomRequests.find(function (x) { return x.id === id; });
   if (!r) return;
+  if (window.unihubSupabase && me() && me().authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("room_requests").update({ status: "Approved", updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+      await refreshSupabaseDormData(); toast("Cancellation declined."); render(); return;
+    } catch (e) { toast("Could not decline cancellation: " + (e.message || "Supabase error")); return; }
+  }
   r.status = r.prevStatus || "Approved"; delete r.prevStatus;
   notify(r.studentId, "Your cancellation request for room " + r.roomId + " was declined. Please visit the Dorm Office.");
   saveDB(); toast("Cancellation declined."); render();
@@ -1016,35 +1192,55 @@ function maintCard(t) {
   return '<div class="card pad">' + person(t.studentId, badge(t.status)) + '<p class="ttl mt">' + esc(t.text) + '</p><p class="sub">Room ' + esc(t.roomId) + " &middot; " + fmtDate(t.date) + "</p>" +
     (t.photo ? '<img class="thumb" src="' + t.photo + '" alt="" onclick="viewPhoto(\'m\',\'' + t.id + '\')"><p class="small">Tap the photo to enlarge.</p>' : "") + (act ? '<div class="actions">' + act + "</div>" : "") + "</div>";
 }
-function startMaint(id) {
-  const t = db.maintenance.find(function (x) { return x.id === id; });
-  if (!t) return;
-  t.status = "In Progress";
-  notify(t.studentId, "The Dorm Office started working on your maintenance request (room " + t.roomId + ").");
-  saveDB(); toast("Marked as in progress."); render();
+async function updateMaintStatus(id, status, successMessage) {
+  const t = db.maintenance.find(function (x) { return x.id === id; }); if (!t) return;
+  if (window.unihubSupabase && me() && me().authId) {
+    try {
+      const { error } = await window.unihubSupabase.from("maintenance_requests").update({ status: status, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+      await refreshSupabaseDormData(); toast(successMessage); render(); return;
+    } catch (e) { toast("Could not update maintenance ticket: " + (e.message || "Supabase error")); return; }
+  }
+  t.status = status; saveDB(); toast(successMessage); render();
 }
-function resolveMaint(id) {
-  const t = db.maintenance.find(function (x) { return x.id === id; });
-  if (!t) return;
-  t.status = "Resolved";
-  notify(t.studentId, "Your maintenance request for room " + t.roomId + " was resolved.");
-  saveDB(); toast("Marked as resolved."); render();
+function startMaint(id) { return updateMaintStatus(id, "In Progress", "Marked as in progress."); }
+function resolveMaint(id) { return updateMaintStatus(id, "Resolved", "Marked as resolved."); }
+function confirmMaintCancel(id) { return updateMaintStatus(id, "Cancelled", "Cancellation confirmed."); }
+function declineMaintCancel(id) { return updateMaintStatus(id, "In Progress", "Cancellation declined."); }
+
+/* ==========================================================================
+   DORMITORY BILLING — Supabase-backed student bills
+   ========================================================================== */
+function loadDormBilling(){
+ const u=me(),d=ui.billingData;if(d.loading||!u||!u.authId)return;d.loading=true;d.error='';
+ (async()=>{try{if(!window.unihubSupabase)throw new Error('Supabase is not connected.');let q=window.unihubSupabase.from('dorm_billing').select('id,student_id,room_id,billing_month,room_charge,other_charges,amount_paid,due_date,status,notes,created_at,profiles!dorm_billing_student_id_fkey(student_id,full_name)').order('billing_month',{ascending:false});if(myRole()==='student')q=q.eq('student_id',u.authId);const {data,error}=await q.limit(200);if(error)throw error;d.rows=data||[];if(myRole()==='dorm'){const [sr,rr]=await Promise.all([window.unihubSupabase.from('profiles').select('id,student_id,full_name').order('full_name'),window.unihubSupabase.from('rooms').select('id,price,occupant_id').order('id')]);if(sr.error)throw sr.error;if(rr.error)throw rr.error;d.students=sr.data||[];d.rooms=rr.data||[];}d.loaded=true;}catch(e){d.error=e.message||'Could not load billing records.';}finally{d.loading=false;render();}})();
 }
-function confirmMaintCancel(id) {
-  const t = db.maintenance.find(function (x) { return x.id === id; });
-  if (!t) return;
-  t.status = "Cancelled"; delete t.prevStatus;
-  notify(t.studentId, "Your maintenance cancellation was confirmed.");
-  saveDB(); toast("Cancellation confirmed."); render();
+function dormBillingScreen(){
+ const u=me();if(!u||(myRole()!=='dorm'&&myRole()!=='student'))return page('dorm',header('Dormitory billing'),empty('Only students and Dorm Staff can access billing.','shield'));
+ const d=ui.billingData;if(!d.loaded&&!d.loading)setTimeout(loadDormBilling,0);
+ let body='<div class="card pad"><p class="ttl">Dormitory billing</p><p class="sub">View monthly room charges, additional charges, payments, due dates, and balances. Payments are recorded by authorized Dorm Staff; this prototype does not process real payments.</p>';
+ if(d.loading)body+='<p class="small">Loading billing records…</p>';
+ if(d.error)body+='<div class="note warn">'+esc(d.error)+'</div><button class="b b-secondary" onclick="loadDormBilling()">Retry</button>';
+ if(myRole()==='dorm'){
+ body+='<p class="sect">Create or update a bill</p><div class="field"><label for="bill-student">Student</label><select class="in" id="bill-student"><option value="">Select student</option>'+d.students.filter(x=>x.student_id).map(x=>'<option value="'+esc(x.id)+'">'+esc((x.full_name||x.student_id)+' ('+x.student_id+')')+'</option>').join('')+'</select></div><div class="field"><label for="bill-room">Room</label><select class="in" id="bill-room" onchange="fillRoomCharge()"><option value="">Select room</option>'+d.rooms.map(x=>'<option value="'+esc(x.id)+'" data-price="'+Number(x.price||0)+'">'+esc(x.id)+' — '+peso(x.price||0)+'/month</option>').join('')+'</select></div><div class="field"><label for="bill-month">Billing month</label><input class="in" type="month" id="bill-month" value="'+new Date().toISOString().slice(0,7)+'"></div><div class="field"><label for="bill-room-charge">Room charge (PHP)</label><input class="in" type="number" min="0" step="0.01" id="bill-room-charge" placeholder="0.00"></div><div class="field"><label for="bill-other">Other charges (PHP)</label><input class="in" type="number" min="0" step="0.01" id="bill-other" value="0"></div><div class="field"><label for="bill-paid">Amount paid (PHP)</label><input class="in" type="number" min="0" step="0.01" id="bill-paid" value="0"></div><div class="field"><label for="bill-due">Due date</label><input class="in" type="date" id="bill-due"></div><div class="field"><label>Payment status</label><p class="small">Calculated automatically from the amount paid, total charge, and due date after you save.</p></div><div class="field"><label for="bill-notes">Notes (optional)</label><input class="in" id="bill-notes" maxlength="300" placeholder="Payment reference or note"></div><button class="b b-accent b-block" onclick="saveDormBill()">Save bill</button></div><p class="sect">All student bills</p>';
+ }else body+='</div><p class="sect">My bills and payment history</p>';
+ body+=d.rows.length?d.rows.map(r=>{const prof=Array.isArray(r.profiles)?r.profiles[0]:r.profiles,total=Number(r.room_charge||0)+Number(r.other_charges||0),balance=Math.max(0,total-Number(r.amount_paid||0));const editBtn=myRole()==='dorm'?'<button class="b b-secondary b-block mt" onclick="editDormBillPaid(\''+r.id+'\','+Number(r.amount_paid||0)+','+total+',\''+String(r.due_date||'').replace(/'/g,'')+'\')">Update payment record</button>':'';return '<div class="card pad"><div class="row between"><div><p class="ttl">'+esc(r.billing_month||'—')+' · Room '+esc(r.room_id||'—')+'</p><p class="sub">'+esc(prof&&prof.full_name||prof&&prof.student_id||'Student')+(prof&&prof.student_id?' ('+esc(prof.student_id)+')':'')+'</p></div>'+badge(r.status)+'</div><div class="kv">'+kv('Room charge',peso(r.room_charge))+kv('Other charges',peso(r.other_charges))+kv('Total',peso(total),true)+kv('Paid',peso(r.amount_paid))+kv('Balance',peso(balance),true)+kv('Due date',r.due_date||'Not set')+'</div>'+(r.notes?'<p class="small">'+esc(r.notes)+'</p>':'')+editBtn+'</div>';}).join(''):(!d.loading&&!d.error?empty('No billing records yet.','wallet'):'');
+ body+='<button class="b b-secondary b-block mt" onclick="ui.billingData.loaded=false;loadDormBilling()">Refresh billing records</button>';
+ const isStudent = myRole()==='student';
+ const billHeader = isStudent
+   ? header('Dorm services',{bell:true,sub:'Your room charges and balances',tabs:[['room','My room'],['browse','Browse'],['maintenance','Maintenance'],['billing','Billing']],active:'billing',onTab:'setDormTab'})
+   : header('Dormitory billing',{bell:true,sub:'Authorized Dorm Staff'});
+ return page(isStudent?'student':'dorm',billHeader,body);
 }
-function declineMaintCancel(id) {
-  const t = db.maintenance.find(function (x) { return x.id === id; });
-  if (!t) return;
-  t.status = t.prevStatus || "In Progress"; delete t.prevStatus;
-  notify(t.studentId, "Your maintenance cancellation request was declined. Work is already in progress.");
-  saveDB(); toast("Cancellation declined."); render();
+async function saveDormBill(){
+ const studentId=document.getElementById('bill-student').value,roomId=document.getElementById('bill-room').value,month=document.getElementById('bill-month').value,roomCharge=Number(document.getElementById('bill-room-charge').value),other=Number(document.getElementById('bill-other').value||0),paid=Number(document.getElementById('bill-paid').value||0),due=document.getElementById('bill-due').value,notes=document.getElementById('bill-notes').value.trim();
+ if(!studentId||!roomId||!month||!due||!Number.isFinite(roomCharge)||roomCharge<0||other<0||paid<0||paid>roomCharge+other){toast('Check the student, room, month, due date, and amounts. Amount paid cannot exceed the total charge.');return;}
+ const status=deriveDormBillStatus(roomCharge+other,paid,due);try{const {error}=await window.unihubSupabase.from('dorm_billing').upsert({student_id:studentId,room_id:roomId,billing_month:month+'-01',room_charge:roomCharge,other_charges:other,amount_paid:paid,due_date:due,status:status,notes:notes||null,created_by:me().authId},{onConflict:'student_id,room_id,billing_month'});if(error)throw error;toast('Billing record saved.');ui.billingData.loaded=false;loadDormBilling();}catch(e){toast('Could not save billing record: '+(e.message||'Supabase error'));}
 }
- 
+function deriveDormBillStatus(total,paid,due){if(total>0&&paid>=total)return 'Paid';if(due&&due<new Date().toISOString().slice(0,10))return 'Overdue';if(paid>0)return 'Partially paid';return 'Unpaid';}
+async function editDormBillPaid(id,current,total,due){const v=prompt('Enter the total amount paid so far (PHP):',String(current));if(v===null)return;const paid=Number(v);if(!Number.isFinite(paid)||paid<0||paid>Number(total)){toast('Enter an amount from 0 up to the total bill ('+peso(total)+').');return;}const next=deriveDormBillStatus(Number(total),paid,due);try{const {error}=await window.unihubSupabase.from('dorm_billing').update({amount_paid:paid,status:next,updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;toast('Payment updated. Status: '+next+'.');ui.billingData.loaded=false;loadDormBilling();}catch(e){toast('Could not update payment: '+(e.message||'Supabase error'));}}
+function fillRoomCharge(){const el=document.getElementById('bill-room'),opt=el&&el.options[el.selectedIndex],field=document.getElementById('bill-room-charge');if(opt&&field&&opt.dataset.price)field.value=opt.dataset.price;}
+
 /* ==========================================================================
    EVENT HANDLER
    ========================================================================== */
@@ -1057,7 +1253,7 @@ function homeEvent() {
     '<button class="b b-accent b-block big" onclick="openEventForm()">' + icon("plus", 14) + " Create event</button>" +
     '<p class="sect">Coming up</p>';
   body += upcoming.length ? upcoming.slice(0, 4).map(function (e) {
-    const n = db.rsvps.filter(function (r) { return r.eventId === e.id; }).length;
+    const n = db.rsvps.filter(function (r) { return String(r.eventId) === String(e.id) && r.status !== "Cancelled"; }).length;
     return '<div class="card pad row between"><div><span class="tag t-gold">' + esc(e.tag) + '</span><p class="ttl mt">' + esc(e.title) + '</p><p class="sub">' + fmtDate(e.date) + " &middot; " + fmtTime(e.time) + " &middot; " + esc(e.place) + '</p></div><div class="center"><span class="num">' + n + '</span><span class="small">going</span></div></div>';
   }).join("") : '<div class="card pad"><p class="small">No upcoming events. Create one to get started.</p></div>';
   return page("event", header(u.name, { bell: true, sub: "Event Handler &middot; " + esc(u.id) }), body);
@@ -1103,6 +1299,24 @@ function saveEvent() {
   if (!title || !f.date || !f.time || !place) { f.error = "Please fill in the title, date, time, and place."; render(); return; }
   if (f.date < todayISO()) { f.error = "The event date cannot be in the past."; render(); return; }
   const u = me();
+  if (window.unihubSupabase && u && u.authId) {
+    (async function () {
+      try {
+        const eventDate = new Date(f.date + "T" + f.time + ":00").toISOString();
+        if (f.id) {
+          const e = eventById(f.id);
+          if (!e || e.dbId == null) throw new Error("This event could not be matched to a Supabase record.");
+          const { error } = await window.unihubSupabase.from("events").update({ title: title, description: f.description.trim() || null, location: place, event_date: eventDate, created_by: u.id }).eq("id", Number(e.dbId));
+          if (error) throw error;
+        } else {
+          const { error } = await window.unihubSupabase.from("events").insert({ title: title, description: f.description.trim() || null, location: place, event_date: eventDate, created_by: u.id });
+          if (error) throw error;
+        }
+        await refreshSupabaseEventData(); ui.eventForm = blankEventForm(); toast(f.id ? "Event updated." : "Event published."); goTo("e_events");
+      } catch (err) { f.error = "Could not save event: " + (err.message || "Supabase error"); render(); }
+    })();
+    return;
+  }
   if (f.id) {
     const e = eventById(f.id);
     if (e) {
@@ -1152,19 +1366,132 @@ function eventAttendance() {
   if (!canMark) body += '<div class="note">Attendance opens on the day of the event (' + fmtDate(e.date) + "). You can still see who has RSVP'd.</div>";
   body += list.length ? list.map(function (r) {
     const right = canMark ? '<button class="b ' + (r.attended ? "b-accent" : "b-soft") + '" onclick="toggleAttend(\'' + r.id + '\')">' + (r.attended ? icon("check", 13) + " Present" : "Mark present") + "</button>" : badge("Pending");
-    return '<div class="card pad">' + person(r.studentId, right) + "</div>";
+    const attendee = r.studentName && r.studentName !== "Student profile unavailable"
+      ? '<div class="row between"><div class="person"><div class="avatar ph" style="width:36px;height:36px">' + esc((r.studentName.match(/\b\w/g) || []).slice(0,2).join("").toUpperCase()) + '</div><div><p class="pname">' + esc(r.studentName) + '</p><p class="psub">' + esc(r.studentId) + '</p></div></div>' + right + '</div>'
+      : person(r.studentId, right);
+    return '<div class="card pad">' + attendee + "</div>";
   }).join("") : empty("No RSVPs for this event yet.", "users");
   return page("event", header("Attendance"), body);
 }
-function toggleAttend(id) {
-  const r = db.rsvps.find(function (x) { return x.id === id; });
+async function toggleAttend(id) {
+  const r = db.rsvps.find(function (x) { return String(x.id) === String(id); });
   if (!r) return;
   const e = eventById(r.eventId);
   if (!e || e.date > todayISO()) { toast("Attendance opens on the event day."); return; }
-  r.attended = !r.attended;
+  const nextAttended = !r.attended;
+  // Persist attendance in Supabase first; do not show success for a local-only change.
+  if (window.unihubSupabase && me() && me().authId && r.authStudentId) {
+    try {
+      const { error } = await window.unihubSupabase.from("event_rsvps")
+        .update({ attendance_status: nextAttended ? "Present" : "Absent" })
+        .eq("id", r.id);
+      if (error) throw error;
+      await refreshSupabaseEventData();
+      toast(nextAttended ? "Attendance saved: Present." : "Attendance updated: Absent.");
+      render();
+      return;
+    } catch (err) {
+      console.error("Could not save attendance to Supabase", err);
+      toast("Attendance was not saved. Check event_rsvps update permissions: " + (err.message || "Supabase error"));
+      return;
+    }
+  }
+  // Local-only fallback is kept for the offline/demo mode.
+  r.attended = nextAttended;
   saveDB(); render();
 }
  
+/* ==========================================================================
+   REGISTRAR - Enrollment status and appointments
+   Note: this prototype stores these records in the same browser localStorage,
+   like the existing document-request workflow.
+   ========================================================================== */
+function enrollmentFor(user) {
+  db.enrollments = db.enrollments || [];
+  let rec = db.enrollments.find(function (e) { return e.studentId === user.id; });
+  if (!rec) {
+    rec = { id: uid("enr"), studentId: user.id, status: "For verification", program: "Not set", yearLevel: "Not set", updatedAt: todayISO(), note: "Your enrollment record is awaiting Registrar verification." };
+    db.enrollments.push(rec); saveDB();
+  }
+  return rec;
+}
+function enrollmentScreen() {
+  const u = me();
+  db.enrollments = db.enrollments || [];
+  if (u.role === "registrar") {
+    const students = db.accounts.filter(function (a) { return a.role === "student"; });
+    const body = '<div class="card pad"><p class="sub">Manage enrollment status for student accounts in this browser prototype.</p></div>' + (students.length ? students.map(function (st) {
+      const e = enrollmentFor(st);
+      return '<div class="card pad"><div class="row between"><div><p class="ttl">' + esc(st.name) + '</p><p class="sub">Student ID: ' + esc(st.id) + '</p></div>' + badge(e.status) + '</div>' +
+        '<div class="field"><label>Enrollment status</label><select class="in" onchange="updateEnrollment(\'' + escAttr(st.id) + '\',this.value)">' + ["For verification","Enrolled","Pending documents","On hold","Not enrolled"].map(function (v) { return '<option' + (e.status === v ? ' selected' : '') + '>' + v + '</option>'; }).join("") + '</select></div>' +
+        '<div class="field"><label>Program / course</label><input class="in" value="' + esc(e.program || "") + '" placeholder="e.g. BS Information Technology" onchange="updateEnrollmentField(\'' + escAttr(st.id) + '\',\'program\',this.value)"></div>' +
+        '<div class="field"><label>Year level</label><select class="in" onchange="updateEnrollmentField(\'' + escAttr(st.id) + '\',\'yearLevel\',this.value)">' + ["Not set","1st Year","2nd Year","3rd Year","4th Year","5th Year"].map(function (v) { return '<option' + ((e.yearLevel || "Not set") === v ? ' selected' : '') + '>' + v + '</option>'; }).join("") + '</select></div>' +
+        '<div class="field"><label>Note for student</label><input class="in" value="' + esc(e.note || "") + '" onchange="updateEnrollmentField(\'' + escAttr(st.id) + '\',\'note\',this.value)"></div>' +
+        '<p class="small">Last updated: ' + fmtDate(e.updatedAt) + '</p></div>';
+    }).join("") : empty("No student accounts found in this browser.", "users"));
+    return page("registrar", header("Enrollment status"), body);
+  }
+  const e = enrollmentFor(u);
+  const body = '<div class="card pad"><div class="row between"><div><p class="sub">Current enrollment status</p><p class="ttl big">' + esc(e.status) + '</p></div>' + badge(e.status) + '</div><div class="divider"></div>' + kv("Student ID", u.id) + kv("Program / course", e.program || "Not set") + kv("Year level", e.yearLevel || "Not set") + kv("Last updated", fmtDate(e.updatedAt)) + (e.note ? '<p class="small mt">' + esc(e.note) + '</p>' : '') + '</div>' + '<p class="small">If your status or program details are incorrect, contact the Registrar office.</p>';
+  return page("student", header("Enrollment status", { back: "goTo('home')" }), body);
+}
+function updateEnrollment(studentId, status) {
+  const st = db.accounts.find(function (a) { return a.id === studentId && a.role === "student"; }); if (!st) return;
+  const e = enrollmentFor(st); e.status = status; e.updatedAt = todayISO();
+  notify(studentId, "Your enrollment status was updated to: " + status + "."); saveDB(); toast("Enrollment status updated."); render();
+}
+function updateEnrollmentField(studentId, field, value) {
+  const st = db.accounts.find(function (a) { return a.id === studentId && a.role === "student"; }); if (!st) return;
+  const e = enrollmentFor(st); if (["program","yearLevel","note"].indexOf(field) === -1) return;
+  e[field] = value; e.updatedAt = todayISO(); saveDB(); toast("Enrollment details saved.");
+}
+function appointmentScreen() {
+  db.appointments = db.appointments || [];
+  const u = me();
+  if (u.role === "registrar") {
+    const list = db.appointments.slice().sort(function (a,b) { return (a.date + a.time).localeCompare(b.date + b.time); });
+    const body = '<div class="card pad"><p class="sub">Review appointment requests submitted by students in this browser prototype.</p></div>' + (list.length ? list.map(function (a) {
+      const student = userById(a.studentId);
+      let actions = '';
+      if (a.status === "Pending") actions = '<div class="actions"><button class="b b-accent" onclick="setAppointmentStatus(\'' + escAttr(a.id) + '\',\'Approved\')">Approve</button><button class="b b-soft" onclick="setAppointmentStatus(\'' + escAttr(a.id) + '\',\'Reschedule required\')">Request reschedule</button><button class="b b-danger" onclick="setAppointmentStatus(\'' + escAttr(a.id) + '\',\'Cancelled\')">Cancel</button></div>';
+      else if (a.status === "Approved") actions = '<div class="actions"><button class="b b-soft" onclick="setAppointmentStatus(\'' + escAttr(a.id) + '\',\'Completed\')">Mark completed</button><button class="b b-danger" onclick="setAppointmentStatus(\'' + escAttr(a.id) + '\',\'Cancelled\')">Cancel</button></div>';
+      return '<div class="card pad"><div class="row between"><div><p class="ttl">' + esc(student ? student.name : a.studentId) + '</p><p class="sub">' + esc(a.purpose) + '</p></div>' + badge(a.status) + '</div><div class="divider"></div>' + kv("Date", fmtDate(a.date)) + kv("Time", a.time) + (a.note ? '<p class="small mt">' + esc(a.note) + '</p>' : '') + actions + '</div>';
+    }).join("") : empty("No appointment requests yet.", "calendar"));
+    return page("registrar", header("Registrar appointments"), body);
+  }
+  const mine = db.appointments.filter(function (a) { return a.studentId === u.id; });
+  const body = '<div class="card pad formcard"><p class="sub">Request a visit with the Registrar. Your appointment is not confirmed until staff approves it.</p>' +
+    '<div class="field"><label>Purpose</label><select class="in" id="appt-purpose"><option>Enrollment inquiry</option><option>Document pickup</option><option>Correction of student record</option><option>Transcript / grades inquiry</option><option>Other</option></select></div>' +
+    '<div class="field"><label>Preferred date</label><input class="in" id="appt-date" type="date" min="' + todayISO() + '"></div>' +
+    '<div class="field"><label>Preferred time</label><select class="in" id="appt-time"><option>09:00</option><option>10:00</option><option>11:00</option><option>13:00</option><option>14:00</option><option>15:00</option></select></div>' +
+    '<div class="field"><label>Additional note (optional)</label><input class="in" id="appt-note" maxlength="250" placeholder="Brief details for the Registrar"></div>' +
+    '<button class="b b-accent b-block big" onclick="submitAppointment()">Request appointment</button></div>' +
+    '<p class="sect">My appointment requests</p>' + (mine.length ? mine.slice().reverse().map(function (a) { return '<div class="card pad"><div class="row between"><p class="ttl">' + esc(a.purpose) + '</p>' + badge(a.status) + '</div>' + kv("Date", fmtDate(a.date)) + kv("Time", a.time) + (a.note ? '<p class="small mt">' + esc(a.note) + '</p>' : '') + (a.status === "Pending" ? '<button class="b b-danger b-block" onclick="cancelAppointment(\'' + escAttr(a.id) + '\')">Cancel request</button>' : '') + '</div>'; }).join("") : empty("You have no appointment requests yet.", "calendar"));
+  return page("student", header("Registrar appointments", { back: "goTo('home')" }), body);
+}
+function submitAppointment() {
+  const u = me();
+  const purpose = document.getElementById("appt-purpose").value;
+  const date = document.getElementById("appt-date").value;
+  const time = document.getElementById("appt-time").value;
+  const note = document.getElementById("appt-note").value.trim();
+  if (!date || date < todayISO()) { toast("Choose today or a future appointment date."); return; }
+  db.appointments = db.appointments || [];
+  db.appointments.unshift({ id: uid("ap"), studentId: u.id, purpose: purpose, date: date, time: time, note: note, status: "Pending", createdAt: todayISO() });
+  notify("role:registrar", "New Registrar appointment request from " + u.name + " for " + fmtDate(date) + " at " + time + ".");
+  saveDB(); toast("Appointment request submitted."); render(true);
+}
+function setAppointmentStatus(id, status) {
+  const a = (db.appointments || []).find(function (x) { return x.id === id; }); if (!a) return;
+  a.status = status;
+  notify(a.studentId, "Your Registrar appointment for " + fmtDate(a.date) + " at " + a.time + " is now " + status + ".");
+  saveDB(); toast("Appointment updated."); render();
+}
+function cancelAppointment(id) {
+  const a = (db.appointments || []).find(function (x) { return x.id === id && x.studentId === me().id; }); if (!a || a.status !== "Pending") return;
+  a.status = "Cancelled"; notify("role:registrar", "A student cancelled a Registrar appointment request for " + fmtDate(a.date) + "."); saveDB(); toast("Appointment cancelled."); render();
+}
+
 /* ==========================================================================
    REGISTRAR STAFF
    ========================================================================== */
@@ -1366,15 +1693,22 @@ function saveProfile() {
    Start
    ========================================================================== */
 loadDB();
-(function () {
-  const sid = getSession();
-  const su = sid ? userById(sid) : null;
-  if (su) {
-    ui.userId = su.id;
-    ui.dormTab = (su.role === "student" && activeRoomReq(su.id)) ? "room" : "browse";
-    ui.screen = "home";
-  } else if (sid) {
-    setSession(null);
-  }
-})();
 render(true);
+(async function restoreSupabaseSession() {
+  if (!window.unihubSupabase) return;
+  try {
+    const { data, error } = await window.unihubSupabase.auth.getSession();
+    if (error || !data.session) return;
+    const { data: profile, error: profileError } = await window.unihubSupabase.from("profiles").select("id,student_id,role,full_name,mobile,email").eq("id", data.session.user.id).single();
+    if (profileError || !profile) return;
+    const roleMap = { student: "student", dorm_staff: "dorm", event_staff: "event", registrar_staff: "registrar" };
+    const u = { id: profile.student_id, authId: profile.id, role: roleMap[profile.role] || "student", name: profile.full_name || profile.student_id, mobile: profile.mobile || "", email: profile.email || data.session.user.email || "", photo: null };
+    const existing = db.accounts.findIndex(a => a.id === u.id);
+    if (existing >= 0) db.accounts[existing] = u; else db.accounts.push(u);
+    ui.userId = u.id; setSession(u.id); ui.screen = "home";
+    ui.dormTab = (u.role === "student" && activeRoomReq(u.id)) ? "room" : "browse";
+    try { await refreshSupabaseDormData(); await refreshSupabaseEventData(); } catch (syncError) { console.warn("Could not restore Supabase data", syncError); }
+    ui.dormTab = (u.role === "student" && activeRoomReq(u.id)) ? "room" : "browse";
+    render(true);
+  } catch (e) { console.warn("Could not restore Supabase session", e); }
+})();

@@ -295,3 +295,12 @@ select.in { max-width: 100%; text-overflow: ellipsis; }
   .navbtn:hover { background: #F7F1E6; }
   .day:hover { background: #F3EDE0; }
 }
+
+/* Phase 7: Dormitory logs form styling */
+.dorm-log-control { display:block; width:100%; min-width:0; margin:5px 0 12px; font-size:13px; border-radius:10px; padding:11px 12px; border:1px solid var(--border); background:#fffdf9; color:var(--text); outline:none; }
+.dorm-log-control:focus { border-color:var(--green-mid); box-shadow:0 0 0 3px rgba(127,181,108,.18); }
+.lbl { display:block; font-size:12px; font-weight:600; color:var(--text); margin:10px 0 4px; }
+.card.pad .ttl { margin-bottom:3px; }
+.card.pad .sub { line-height:1.45; margin-bottom:8px; }
+.card.pad .note.warn { border-radius:10px; padding:12px 14px; margin:10px 0; line-height:1.45; overflow-wrap:anywhere; }
+@media (min-width:700px) { .dorm-log-control { font-size:14px; } }
