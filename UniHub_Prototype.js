@@ -555,7 +555,7 @@ async function doSignup() {
   else if (!/^[A-Z0-9-]{3,20}$/.test(id)) err = "ID number must be 3-20 letters, numbers, or dashes.";
   else if (!validMobile(mobile)) err = "Enter a valid mobile number (e.g. 09171234567).";
   else if (!validEmail(email)) err = "Enter a valid email address.";
-  else if (s.password.length < 8) err = "Password must be at least 8 characters.";
+  else if (s.password.length < 6) err = "Password must be at least 8 characters.";
   else if (s.password !== s.confirm) err = "Passwords do not match.";
   else if (!s.agree) err = "Please accept the data privacy notice to continue.";
   if (err) { s.error = err; render(); return; }
