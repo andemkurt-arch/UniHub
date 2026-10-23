@@ -565,11 +565,8 @@ async function doSignup() {
     const { data, error } = await window.unihubSupabase.auth.signUp({ email, password: s.password, options: { data: { full_name: name, student_id: id } } });
     if (error) throw error;
     if (!data.user) throw new Error("Supabase did not return a user. Please try again.");
-    // A profile row is created explicitly. RLS must allow an authenticated user to insert only their own id.
-    if (data.session) {
-      const { error: profileError } = await window.unihubSupabase.from("profiles").insert({ id: data.user.id, student_id: id, role: "student", full_name: name, mobile, email });
-      if (profileError) throw new Error("Auth account was created, but profile creation failed. Ask the administrator to check profiles RLS policies. " + profileError.message);
-    }
+   
+    // Supabase trigger handle_new_unihub_user() creates the profile automatically.
     ui.loginId = email; ui.loginPw = ""; ui.loginError = ""; ui.signup = blankSignup(); ui.screen = "login"; render(true);
     toast(data.session ? "Account created. Log in with your email." : "Check your email to confirm your account, then log in.");
   } catch (e) { s.error = e.message || "Could not create account."; render(); }
