@@ -572,7 +572,7 @@ async function doSignup() {
   if (!window.unihubSupabase) { s.error = "Supabase is not configured. Check supabase-config.js."; render(); return; }
   try {
     s.error = "Creating account…"; render();
-    const { data, error } = await window.unihubSupabase.auth.signUp({ email, password: s.password, options: { data: { full_name: name, student_id: id } } });
+    const { data, error } = await window.unihubSupabase.auth.signUp({ email, password: s.password, options: { data: { full_name: name, student_id: id, mobile: mobile } } });
     if (error) throw error;
     if (!data.user) throw new Error("Supabase did not return a user. Please try again.");
    
