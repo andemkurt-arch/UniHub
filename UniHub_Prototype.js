@@ -295,6 +295,7 @@ const ui = {
   profileEdit: { mobile: "", email: "", photo: undefined, error: "" },
   notifUnread: [],
   billingData: { loaded:false, loading:false, error:"", rows:[], students:[], rooms:[] },
+  staffForm: { name:"", id:"", mobile:"", email:"", password:"", passwordVisible:false, role:"event_staff", error:"", busy:false },
   viewer: null
 };
  
@@ -379,7 +380,7 @@ function render(resetScroll) {
   else if (ui.screen === "signup") html = renderSignup();
   else html = renderScreen(ui.screen) + renderBottomNav() + (ui.viewer ? renderViewer() : "");
   root.innerHTML = html;
-  root.className = (ui.screen === "login" || ui.screen === "signup") ? "" : "withnav";
+  root.className = (["login", "signup"].includes(ui.screen)) ? "" : "withnav";
   const key = ui.screen + "|" + ui.userId;
   const sc = root.querySelector ? root.querySelector(".scroll") : null;
   if (sc && !resetScroll && lastKey === key) sc.scrollTop = keep;
@@ -402,13 +403,14 @@ function renderScreen(s) {
     case "r_payments": return registrarPayments();
     case "profile": return profileScreen();
     case "profile_edit": return profileEditScreen();
+    case "staff_admin": return staffAdminScreen();
     case "notifications": return notificationsScreen();
   }
   return homeStudent();
 }
 function navActive(s) {
   if (s === "e_form") return "e_events";
-  if (s === "profile_edit") return "profile";
+  if (s === "profile_edit" || s === "staff_admin") return "profile";
   if (s === "notifications") return "";
   return s;
 }
@@ -460,12 +462,13 @@ function renderLogin() {
     '<div class="brand"><div class="emblem"><span class="fl">' + icon("flame", 20) + '</span><span class="bk">' + icon("book", 18) + "</span></div>" +
     "<h1>UniHub</h1><p class=\"u\">Kalinga State University</p><p class=\"tag\">Bridging financial gaps, building brighter futures</p></div>" +
     '<div class="authform">' +
-    '<input class="auth-in" placeholder="Email address" type="email" value="' + esc(ui.loginId) + '" oninput="ui.loginId=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
-    '<div class="password-wrap auth-password-wrap"><input id="login-password" class="auth-in" type="password" placeholder="Password" value="' + esc(ui.loginPw) + '" oninput="ui.loginPw=this.value" onkeydown="if(event.key===\'Enter\')doLogin()"><button class="password-toggle auth-password-toggle" type="button" data-toggle-for="login-password" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility(\'login-password\')">' + eyeIcon(false) + '</button></div>' +
+    '<input class="auth-in" placeholder="Email address" type="email" autocomplete="off" value="' + esc(ui.loginId) + '" oninput="ui.loginId=this.value" onkeydown="if(event.key===\'Enter\')doLogin()">' +
+    '<div class="password-wrap auth-password-wrap"><input id="login-password" class="auth-in" type="password" autocomplete="current-password" placeholder="Password" value="' + esc(ui.loginPw) + '" oninput="ui.loginPw=this.value" onkeydown="if(event.key===\'Enter\')doLogin()"><button class="password-toggle auth-password-toggle" type="button" data-toggle-for="login-password" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility(\'login-password\')">' + eyeIcon(false) + '</button></div>' +
     (ui.loginError ? '<p class="autherr">' + esc(ui.loginError) + "</p>" : "") +
     '<button class="b b-gold b-block big" onclick="doLogin()">Log in</button>' +
     '<p class="authalt">New to UniHub? <button class="linkbtn" onclick="openSignup()">Create account</button></p></div></div>';
 }
+
 async function doLogin() {
   const email = (ui.loginId || "").trim().toLowerCase();
   const pw = ui.loginPw || "";
@@ -509,7 +512,14 @@ function startSession(u) {
 }
 function logout() {
   if (window.unihubSupabase) window.unihubSupabase.auth.signOut().catch(function (e) { console.warn("Supabase sign-out failed", e); });
-  ui.userId = null; setSession(null); ui.screen = "login"; render(true);
+  // Clear credentials so the login form never shows a previous password after logout.
+  ui.userId = null;
+  ui.loginId = "";
+  ui.loginPw = "";
+  ui.loginError = "";
+  setSession(null);
+  ui.screen = "login";
+  render(true);
 }
 function openSignup() { ui.signup = blankSignup(); ui.screen = "signup"; render(true); }
 function setSignupRole(r) { ui.signup.role = r; render(); }
@@ -1609,10 +1619,100 @@ function profileScreen() {
   const body = '<div class="card pad profilecard">' + avatar(u, 88) + '<p class="ttl big mt">' + esc(u.name) + '</p><p class="sub">ID: ' + esc(u.id) + '</p><span class="tag t-role">' + ROLES[u.role].label + "</span></div>" +
     '<div class="card pad"><div class="inforow">' + icon("phone", 16) + '<div><p class="small">Mobile number</p><p class="ttl">' + esc(u.mobile || "Not set") + '</p></div></div><div class="inforow">' + icon("mail", 16) + '<div><p class="small">Email</p><p class="ttl">' + esc(u.email || "Not set") + '</p></div></div></div>' +
     '<button class="b b-accent b-block big" onclick="openProfileEdit()">' + icon("pencil", 14) + " Edit profile</button>" +
+    '<button class="b b-soft b-block" onclick="openStaffAdmin()">' + icon("users", 14) + " Staff account management (admin only)</button>" +
     (u.role === "student" ? '<div class="card pad"><p class="ttl">Testing data</p><p class="sub">Remove your student account and the requests, maintenance reports, RSVPs, and personal notifications you created while testing. Shared rooms and events will remain.</p><button class="b b-danger b-block" onclick="clearMyTestData()">Clear my test data</button></div>' : "") +
     '<button class="b b-danger b-block big" onclick="logout()">' + icon("logout", 14) + " Log out</button>";
   return page(ROLES[u.role].theme, header("Profile"), body);
 }
+function openStaffAdmin() {
+  ui.staffForm = { name:"", id:"", mobile:"", email:"", password:"", passwordVisible:false, role:"event_staff", error:"", busy:false };
+  goTo("staff_admin");
+}
+function toggleStaffTemporaryPassword() {
+  ui.staffForm.passwordVisible = !ui.staffForm.passwordVisible;
+  render();
+}
+
+function staffAdminScreen() {
+  const f = ui.staffForm;
+  const roles = [
+    ["event_staff", "Event Staff"],
+    ["dorm_staff", "Dorm Staff"],
+    ["registrar_staff", "Registrar Staff"]
+  ];
+  const options = roles.map(function (r) {
+    return '<option value="' + r[0] + '"' + (f.role === r[0] ? ' selected' : '') + '>' + r[1] + '</option>';
+  }).join("");
+  const disabled = f.busy ? ' disabled' : '';
+  const body = '<div class="card pad formcard">' +
+    '<p class="sub">Create staff accounts here. Only an account authorized by the UniHub administrator can complete this action.</p>' +
+    '<div class="field"><label>Full name</label><input class="in" autocomplete="name" placeholder="Staff full name" value="' + esc(f.name) + '" oninput="ui.staffForm.name=this.value"' + disabled + '></div>' +
+    '<div class="field"><label>Staff ID</label><input class="in" placeholder="e.g. EVT-0001" value="' + esc(f.id) + '" oninput="ui.staffForm.id=this.value"' + disabled + '></div>' +
+    '<div class="field"><label>Mobile number</label><input class="in" type="tel" autocomplete="tel" placeholder="Mobile number" value="' + esc(f.mobile) + '" oninput="ui.staffForm.mobile=this.value"' + disabled + '></div>' +
+    '<div class="field"><label>Email address</label><input class="in" type="email" autocomplete="email" placeholder="staff@university.edu" value="' + esc(f.email) + '" oninput="ui.staffForm.email=this.value"' + disabled + '></div>' +
+    '<div class="field"><label>Temporary password</label><div class="password-wrap"><input id="staff-temporary-password" class="in" type="' + (f.passwordVisible ? 'text' : 'password') + '" autocomplete="new-password" placeholder="At least 8 characters" value="' + esc(f.password) + '" oninput="ui.staffForm.password=this.value"' + disabled + '><button class="password-toggle" type="button" aria-label="' + (f.passwordVisible ? 'Hide password' : 'Show password') + '" title="' + (f.passwordVisible ? 'Hide password' : 'Show password') + '" onclick="toggleStaffTemporaryPassword()"' + disabled + '>' + eyeIcon(f.passwordVisible) + '</button></div></div>' +
+    '<div class="field"><label>Staff role</label><select class="in" onchange="ui.staffForm.role=this.value"' + disabled + '>' + options + '</select></div>' +
+    (f.error ? '<p class="formerr">' + esc(f.error) + '</p>' : '') +
+    '<button class="b b-accent b-block big" onclick="createStaffAccount()"' + disabled + '>' + (f.busy ? 'Creating account…' : 'Create staff account') + '</button>' +
+    '<button class="b b-soft b-block" onclick="goTo(\'profile\')"' + disabled + '>Back to profile</button>' +
+    '</div>';
+  return page(ROLES[myRole()].theme, header("Staff management", { back: "goTo('profile')" }), body);
+}
+async function createStaffAccount() {
+  const f = ui.staffForm;
+  if (f.busy) return;
+  const payload = {
+    full_name: (f.name || "").trim(),
+    student_id: (f.id || "").trim(),
+    mobile: (f.mobile || "").trim(),
+    email: (f.email || "").trim().toLowerCase(),
+    password: f.password || "",
+    role: f.role
+  };
+  if (!payload.full_name || !payload.student_id || !payload.email || !payload.password) {
+    f.error = "Fill in the name, staff ID, email, and password."; render(); return;
+  }
+  if (!validEmail(payload.email)) { f.error = "Enter a valid email address."; render(); return; }
+  if (payload.password.length < 8) { f.error = "Password must be at least 8 characters."; render(); return; }
+  if (["event_staff", "dorm_staff", "registrar_staff"].indexOf(payload.role) === -1) {
+    f.error = "Choose a valid staff role."; render(); return;
+  }
+  if (!window.unihubSupabase) { f.error = "Supabase is not configured."; render(); return; }
+  f.busy = true; f.error = ""; render();
+  try {
+    // Refresh the authenticated session and pass its access token explicitly.
+    // This avoids relying on a potentially stale/missing Authorization header.
+    let { data: sessionData, error: sessionError } = await window.unihubSupabase.auth.getSession();
+    if (sessionError) throw new Error("Could not check your login session. Please log out and log in again.");
+    let session = sessionData && sessionData.session;
+    if (!session || !session.access_token) {
+      const refreshed = await window.unihubSupabase.auth.refreshSession();
+      if (refreshed.error || !refreshed.data || !refreshed.data.session) {
+        throw new Error("Your login session has expired. Please log out, log in again, and retry.");
+      }
+      session = refreshed.data.session;
+    }
+    const { data, error } = await window.unihubSupabase.functions.invoke("create-staff-account", {
+      body: payload,
+      headers: { Authorization: "Bearer " + session.access_token }
+    });
+    if (error) {
+      let detail = error.message || "The staff account could not be created.";
+      if (error.context && typeof error.context.json === "function") {
+        try { const serverBody = await error.context.json(); if (serverBody && serverBody.error) detail = serverBody.error; } catch (_) {}
+      }
+      throw new Error(detail);
+    }
+    if (data && data.error) throw new Error(data.error);
+    f.name = ""; f.id = ""; f.mobile = ""; f.email = ""; f.password = "";
+    toast("Staff account created successfully.");
+  } catch (e) {
+    f.error = e && e.message ? e.message : "Could not create staff account. Please try again.";
+  } finally {
+    f.busy = false; render();
+  }
+}
+
 function clearMyTestData() {
   const u = me();
   if (!u || u.role !== "student") return;
@@ -1690,7 +1790,7 @@ function saveProfile() {
    Start
    ========================================================================== */
 loadDB();
-render(true);
+render(true); // Show the login screen immediately while session restoration runs.
 (async function restoreSupabaseSession() {
   if (!window.unihubSupabase) return;
   try {
